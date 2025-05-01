@@ -28,8 +28,13 @@ class AppUsageMonitorService : Service() {
     private val STATS_CHANNEL_ID = "TimeLinterStatsChannel"
     private val NOTIFICATION_ID = 1
     private val STATS_NOTIFICATION_ID = 2
-    private val lastNotificationTime = AtomicLong(0)
-    private val notificationInterval = 10L // seconds
+    
+    // Timings
+    private val statsUpdateIntervalSeconds = 30L // How often to update the stats notification
+    private val naggingIntervalSeconds = 30L // Minimum interval between nagging notifications
+    private val checkIntervalSeconds = 10L // How often to check app usage for time tracking
+
+    private val lastNaggingNotificationTime = AtomicLong(0) // Track time for nagging notification specifically
     private val sessionStartTime = AtomicLong(System.currentTimeMillis())
     private val dailyStartTime = AtomicLong(getStartOfDay())
     private val sessionWastedTime = AtomicLong(0)
@@ -66,30 +71,43 @@ class AppUsageMonitorService : Service() {
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
                 handleReply(intent)
+                // We might want to reset lastNaggingNotificationTime here
+                // if a reply means the user acknowledged the notification.
+                // lastNaggingNotificationTime.set(0) 
             }
-            // Handle other actions if any (e.g., from MainActivity to start/stop)
             else -> {
                  Log.d(TAG, "onStartCommand: Starting monitoring")
-                 startMonitoring()
+                 // Check if already running to avoid rescheduling
+                 if (executor.isShutdown || executor.isTerminated) {
+                    startMonitoring()
+                 } else {
+                    Log.d(TAG, "Monitoring executor already running.")
+                 }
             }
         }
         return START_STICKY
     }
 
     private fun startMonitoring() {
-        Log.d(TAG, "startMonitoring called - scheduling checks every 10 seconds")
+        Log.d(TAG, "startMonitoring called - scheduling checks every $checkIntervalSeconds seconds, stats update every $statsUpdateIntervalSeconds seconds")
+        // Schedule the main check frequently for accurate time tracking
         executor.scheduleAtFixedRate({
-            Log.d(TAG, "Scheduled task running: checkAppUsage and updateStatsNotification")
+            Log.v(TAG, "Scheduled task running: checkAppUsage") // Use Verbose for frequent logs
             checkAppUsage()
-            updateStatsNotification()
-        }, 0, 10, TimeUnit.SECONDS)
+        }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
+        
+        // Schedule stats notification update less frequently
+         executor.scheduleAtFixedRate({
+             Log.d(TAG, "Scheduled task running: updateStatsNotification")
+             updateStatsNotification()
+         }, 5, statsUpdateIntervalSeconds, TimeUnit.SECONDS) // Start after a small delay, update less often
     }
 
     private fun checkAppUsage() {
         Log.d(TAG, "checkAppUsage started")
         val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
-        val beginTime = endTime - 1000 * 10
+        val beginTime = endTime - 1000 * checkIntervalSeconds
 
         var foregroundApp: String? = null
         try {
@@ -154,15 +172,24 @@ class AppUsageMonitorService : Service() {
             Log.d(TAG, "Current app '$currentApp' ('$detectedApp') is not wasteful or hasn't changed.")
         }
 
+        // Send nagging notification ONLY if interval has passed AND wasteful app is active
         if (isWastefulApp(detectedApp)) {
             val currentTime = System.currentTimeMillis()
-            val timeSinceLastNotification = currentTime - lastNotificationTime.get()
-            
-            if (timeSinceLastNotification >= notificationInterval * 1000) {
-                Log.d(TAG, "Interval passed, sending nagging notification.")
-                sendNotification()
-                lastNotificationTime.set(currentTime)
+            val timeSinceLastNag = currentTime - lastNaggingNotificationTime.get()
+
+            if (timeSinceLastNag >= naggingIntervalSeconds * 1000) {
+                Log.d(TAG, "Nagging interval ($naggingIntervalSeconds s) passed, sending inline reply notification.")
+                sendNotification() // This posts the notification with the reply action
+                lastNaggingNotificationTime.set(currentTime) // Reset timer for the nagging notification
+            } else {
+                 Log.v(TAG, "Still within nagging interval ($timeSinceLastNag ms < ${naggingIntervalSeconds * 1000} ms)")
             }
+        } else {
+            // If the current app is not wasteful, reset the nagging timer 
+            // so the nag appears quickly if they switch back to a wasteful one.
+            // Alternatively, keep the timer running if you want 30s gap regardless.
+             lastNaggingNotificationTime.set(0) // Resetting means nag is ready if they switch back
+             Log.v(TAG, "Non-wasteful app active, resetting nagging timer.")
         }
         Log.d(TAG, "checkAppUsage finished. Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
     }
