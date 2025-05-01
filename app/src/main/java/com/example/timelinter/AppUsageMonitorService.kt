@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.text.SimpleDateFormat
 import java.util.*
 import android.app.usage.UsageStats
+import android.app.PendingIntent
+import androidx.core.app.RemoteInput
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -35,6 +37,16 @@ class AppUsageMonitorService : Service() {
     private var currentApp: String? = null
     private var lastAppChangeTime = AtomicLong(System.currentTimeMillis())
 
+    // Action for launching discussion activity
+    companion object {
+        const val ACTION_DISCUSS_TIME = "com.example.timelinter.ACTION_DISCUSS_TIME"
+        const val EXTRA_APP_NAME = "com.example.timelinter.EXTRA_APP_NAME"
+        const val EXTRA_SESSION_TIME_MS = "com.example.timelinter.EXTRA_SESSION_TIME_MS"
+        const val EXTRA_DAILY_TIME_MS = "com.example.timelinter.EXTRA_DAILY_TIME_MS"
+        const val ACTION_HANDLE_REPLY = "com.example.timelinter.ACTION_HANDLE_REPLY"
+        const val KEY_TEXT_REPLY = "key_text_reply"
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
@@ -50,8 +62,17 @@ class AppUsageMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand called")
-        startMonitoring()
+        Log.d(TAG, "onStartCommand received action: ${intent?.action}")
+        when (intent?.action) {
+            ACTION_HANDLE_REPLY -> {
+                handleReply(intent)
+            }
+            // Handle other actions if any (e.g., from MainActivity to start/stop)
+            else -> {
+                 Log.d(TAG, "onStartCommand: Starting monitoring")
+                 startMonitoring()
+            }
+        }
         return START_STICKY
     }
 
@@ -156,20 +177,105 @@ class AppUsageMonitorService : Service() {
         return wastefulApps.contains(packageName)
     }
 
+    private fun handleReply(intent: Intent) {
+        val remoteInput = RemoteInput.getResultsFromIntent(intent)
+        if (remoteInput != null) {
+            val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
+            if (!replyText.isNullOrEmpty()) {
+                Log.i(TAG, "User replied: '$replyText'")
+                // TODO: Process the reply (send to AI, etc.)
+
+                // For now, let's re-post the original notification without the input action
+                // to give feedback that the reply was processed.
+                // Ideally, you might show a different notification or update the existing one.
+                // A simple approach is to cancel the original and potentially post a new one.
+                // Or update the existing one by removing the action / remote input.
+                notificationManager.cancel(NOTIFICATION_ID) // Cancel the one with the input
+                
+                // Optional: Post a temporary confirmation or just let the stats notification remain.
+                // Log.d(TAG, "Reply processed. Notification cancelled.")
+                
+                // Placeholder for sending to AI
+                sendToAI("User: $replyText\nAI:") // Example function call
+            } else {
+                 Log.w(TAG, "Received empty reply.")
+            }
+        } else {
+             Log.w(TAG, "Could not extract remote input from reply intent.")
+        }
+    }
+    
+    // Placeholder function for AI interaction
+    private fun sendToAI(prompt: String) {
+        Log.d(TAG, "Placeholder: Sending to AI:$prompt")
+        // Here you would implement the actual API call to Gemini or another AI
+        // And potentially update the notification with the AI's response
+    }
+
     private fun sendNotification() {
-        Log.d(TAG, "sendNotification called (nagging notification)")
+        Log.d(TAG, "sendNotification called (prompting for inline reply)")
+
+        val sessionMs = sessionWastedTime.get()
+        val dailyMs = dailyWastedTime.get()
+        val appName = getReadableAppName(currentApp)
+
+        // 1. Define RemoteInput
+        val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run {
+            setLabel("Your thoughts?")
+            build()
+        }
+
+        // 2. Create PendingIntent for the reply action
+        val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
+            action = ACTION_HANDLE_REPLY
+            // We might need to pass notification ID or other context here if needed later
+        }
+        val replyPendingIntent: PendingIntent = PendingIntent.getService(
+            this,
+            NOTIFICATION_ID, // Use notification ID as request code for uniqueness
+            replyIntent,
+             // Use FLAG_UPDATE_CURRENT so extras are updated if notification reposts
+             // FLAG_MUTABLE is required for RemoteInput
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        // 3. Create Notification Action with RemoteInput
+        val action: NotificationCompat.Action = NotificationCompat.Action.Builder(
+            R.drawable.ic_launcher_foreground, // Use an appropriate icon
+            "Reply",
+            replyPendingIntent
+        )
+        .addRemoteInput(remoteInput)
+        .build()
+
+        // 4. Build the notification
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Time Check")
-            .setContentText("Hey! Is this really the best use of your time right now?")
+            .setContentText("Spending time on $appName. Worth it?") // Shorter text
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // Add the inline reply action
+            .addAction(action)
+            .setAutoCancel(true) // Automatically dismiss after action (like reply)
             .build()
 
         try {
+            // Use NOTIFICATION_ID for this notification
             notificationManager.notify(NOTIFICATION_ID, notification)
-            Log.d(TAG, "Nagging notification sent successfully.")
+            Log.d(TAG, "Inline reply notification sent successfully.")
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending nagging notification", e)
+            Log.e(TAG, "Error sending inline reply notification", e)
+        }
+    }
+    
+    private fun getReadableAppName(packageName: String?): String {
+         return when (packageName) {
+            "com.facebook.katana" -> "Facebook"
+            "com.instagram.android" -> "Instagram"
+            "com.twitter.android" -> "Twitter"
+            "com.google.android.youtube" -> "YouTube"
+            null -> "Unknown App"
+            else -> packageName // Return package name if not in our known list
         }
     }
 
