@@ -10,6 +10,7 @@ object ApiKeyManager {
 
     private const val PREFERENCE_FILE_KEY = "com.example.timelinter.encrypted_prefs"
     private const val API_KEY_PREF = "gemini_api_key"
+    private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
     private const val TAG = "ApiKeyManager"
 
     private fun getEncryptedPreferences(context: Context): SharedPreferences? {
@@ -53,5 +54,16 @@ object ApiKeyManager {
     fun clearKey(context: Context) {
          getEncryptedPreferences(context)?.edit()?.remove(API_KEY_PREF)?.apply()
          Log.i(TAG, "API Key cleared.")
+    }
+
+    fun setHeadsUpInfoShown(context: Context) {
+        getEncryptedPreferences(context)?.edit()?.putBoolean(HEADS_UP_INFO_SHOWN_PREF, true)?.apply()
+        Log.i(TAG, "Heads-up info shown flag set.")
+    }
+
+    fun hasHeadsUpInfoBeenShown(context: Context): Boolean {
+        val shown = getEncryptedPreferences(context)?.getBoolean(HEADS_UP_INFO_SHOWN_PREF, false) ?: false
+        Log.d(TAG, "Heads-up info shown flag checked: $shown")
+        return shown
     }
 } 

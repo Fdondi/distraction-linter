@@ -115,19 +115,23 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestUsageAccess() {
          if (hasUsageStatsPermission()) {
-            // All permissions granted, now check if we should show Heads-Up info
             handlePermissionSuccess()
-        } else {
-            // Show dialog to guide user to Usage Access settings
-            showUsageAccessDialog = true
-        }
+        } else { showUsageAccessDialog = true }
     }
 
     private fun handlePermissionSuccess() {
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // On Oreo+, suggest checking channel settings for pop-up behavior
-            showHeadsUpInfoDialog = true
-            // Service start is deferred until dialog is dismissed
+            // *** Check if info dialog has been shown before ***
+            if (!ApiKeyManager.hasHeadsUpInfoBeenShown(this)) {
+                // Show dialog AND set the flag
+                showHeadsUpInfoDialog = true
+                ApiKeyManager.setHeadsUpInfoShown(this)
+                // Service start is deferred until dialog is dismissed
+            } else {
+                 // Info already shown, proceed to start service directly
+                 Log.d("MainActivity", "Heads-up info previously shown, skipping dialog.")
+                 startMonitoringServiceIfPermitted()
+            }
          } else {
             // On older versions, just start the service
              startMonitoringServiceIfPermitted()
