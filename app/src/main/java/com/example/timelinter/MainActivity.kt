@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     private var showUsageAccessDialog by mutableStateOf(false)
     private var showNotificationPermissionRationale by mutableStateOf(false)
+    private var showHeadsUpInfoDialog by mutableStateOf(false)
     private var isMonitoringActive by mutableStateOf(false)
     private var apiKeyPresent by mutableStateOf(false)
 
@@ -65,7 +66,13 @@ class MainActivity : ComponentActivity() {
                     onSaveApiKey = {
                         ApiKeyManager.saveKey(this, it)
                         apiKeyPresent = true
-                    }
+                    },
+                    showHeadsUpInfoDialog = showHeadsUpInfoDialog,
+                    onDismissHeadsUpInfoDialog = {
+                        showHeadsUpInfoDialog = false
+                        startMonitoringServiceIfPermitted()
+                    },
+                    onGoToChannelSettings = { openNotificationChannelSettings() }
                 )
             }
         }
@@ -108,16 +115,37 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestUsageAccess() {
          if (hasUsageStatsPermission()) {
-            // Both permissions granted, start the service
-            startMonitoringService()
-            isMonitoringActive = true
+            // All permissions granted, now check if we should show Heads-Up info
+            handlePermissionSuccess()
         } else {
             // Show dialog to guide user to Usage Access settings
             showUsageAccessDialog = true
         }
     }
 
-     private fun hasNotificationPermission(): Boolean {
+    private fun handlePermissionSuccess() {
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // On Oreo+, suggest checking channel settings for pop-up behavior
+            showHeadsUpInfoDialog = true
+            // Service start is deferred until dialog is dismissed
+         } else {
+            // On older versions, just start the service
+             startMonitoringServiceIfPermitted()
+         }
+    }
+
+    private fun startMonitoringServiceIfPermitted() {
+        if (hasNotificationPermission() && hasUsageStatsPermission() && ApiKeyManager.hasKey(this)) {
+            Log.i("MainActivity", "All permissions and API Key present. Starting Monitoring Service.")
+            startMonitoringService() // The actual service start call
+            isMonitoringActive = true
+        } else {
+            Log.w("MainActivity", "Attempted to start service without all permissions/key.")
+            isMonitoringActive = false // Ensure state is correct
+        }
+    }
+
+    private fun hasNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // TIRAMISU = API 33
             return ContextCompat.checkSelfPermission(
                 this,
@@ -154,6 +182,36 @@ class MainActivity : ComponentActivity() {
         showUsageAccessDialog = false // Dismiss dialog before opening settings
         val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
         startActivity(intent)
+    }
+
+    private fun openNotificationChannelSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                putExtra(Settings.EXTRA_CHANNEL_ID, AppUsageMonitorService.CHANNEL_ID) 
+            }
+            try {
+                 startActivity(intent)
+            } catch (e: Exception) {
+                 Log.e("MainActivity", "Error opening channel settings", e)
+                 openAppNotificationSettings()
+            }
+        } else {
+            openAppNotificationSettings()
+        }
+        showHeadsUpInfoDialog = false
+        startMonitoringServiceIfPermitted()
+    }
+
+    private fun openAppNotificationSettings() {
+         val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            }
+            try {
+                 startActivity(intent)
+            } catch (e: Exception) {
+                 Log.e("MainActivity", "Error opening app notification settings", e)
+            }
     }
 
     private fun startMonitoringService() {
@@ -195,7 +253,10 @@ fun TimeLinterApp(
     onDismissNotificationPermissionRationale: () -> Unit,
     onRequestNotificationPermissionAgain: () -> Unit,
     apiKeyPresent: Boolean,
-    onSaveApiKey: (String) -> Unit
+    onSaveApiKey: (String) -> Unit,
+    showHeadsUpInfoDialog: Boolean,
+    onDismissHeadsUpInfoDialog: () -> Unit,
+    onGoToChannelSettings: () -> Unit
 ) {
     var apiKeyInput by rememberSaveable { mutableStateOf("") }
 
@@ -290,6 +351,25 @@ fun TimeLinterApp(
                          Text("Cancel")
                      }
                  }
+            )
+        }
+
+        // Dialog for Heads-Up/Pop-on-screen Info
+        if (showHeadsUpInfoDialog) {
+            AlertDialog(
+                onDismissRequest = onDismissHeadsUpInfoDialog,
+                title = { Text("Notification Style Suggestion") },
+                text = { Text("For the best experience, allow Time Linter's 'Conversation' notifications to 'Pop on screen'. This lets the AI reply appear immediately over other apps. You can check this in the channel settings.") },
+                confirmButton = {
+                    Button(onClick = onGoToChannelSettings) {
+                        Text("Open Settings")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = onDismissHeadsUpInfoDialog) {
+                        Text("Maybe Later")
+                    }
+                }
             )
         }
     }

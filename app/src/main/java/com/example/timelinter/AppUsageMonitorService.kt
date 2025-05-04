@@ -36,11 +36,23 @@ class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
     private val executor = Executors.newSingleThreadScheduledExecutor()
     private lateinit var notificationManager: NotificationManager
-    private val CHANNEL_ID = "TimeLinterChannel"
-    private val STATS_CHANNEL_ID = "TimeLinterStatsChannel"
-    private val NOTIFICATION_ID = 1
-    private val STATS_NOTIFICATION_ID = 2
-    
+
+    companion object {
+        // Notification Channel IDs
+        const val CHANNEL_ID = "TimeLinterChannel" // Conversation Channel
+        const val STATS_CHANNEL_ID = "TimeLinterStatsChannel" // Stats Channel
+        // Notification IDs
+        const val NOTIFICATION_ID = 1 // Conversation Notification
+        const val STATS_NOTIFICATION_ID = 2 // Persistent Stats Notification
+        
+        // Intent Actions & Extras
+        const val ACTION_HANDLE_REPLY = "com.example.timelinter.ACTION_HANDLE_REPLY"
+        const val KEY_TEXT_REPLY = "key_text_reply"
+        const val EXTRA_APP_NAME = "com.example.timelinter.EXTRA_APP_NAME"
+        const val EXTRA_SESSION_TIME_MS = "com.example.timelinter.EXTRA_SESSION_TIME_MS"
+        const val EXTRA_DAILY_TIME_MS = "com.example.timelinter.EXTRA_DAILY_TIME_MS"
+    }
+
     // Timings
     private val statsUpdateIntervalSeconds = 30L // How often to update the stats notification
     private val naggingIntervalSeconds = 30L // Minimum interval between nagging notifications
@@ -63,26 +75,12 @@ class AppUsageMonitorService : Service() {
     // Use volatile for thread safety, though AtomicBoolean is often preferred
     @Volatile private var isMonitoringScheduled = false
 
-    // Action for launching discussion activity
-    companion object {
-        const val ACTION_DISCUSS_TIME = "com.example.timelinter.ACTION_DISCUSS_TIME"
-        const val EXTRA_APP_NAME = "com.example.timelinter.EXTRA_APP_NAME"
-        const val EXTRA_SESSION_TIME_MS = "com.example.timelinter.EXTRA_SESSION_TIME_MS"
-        const val EXTRA_DAILY_TIME_MS = "com.example.timelinter.EXTRA_DAILY_TIME_MS"
-        const val ACTION_HANDLE_REPLY = "com.example.timelinter.ACTION_HANDLE_REPLY"
-        const val KEY_TEXT_REPLY = "key_text_reply"
-    }
-
     // Define Persons for MessagingStyle
     private lateinit var userPerson: Person
     private lateinit var aiPerson: Person
 
     // Store the current conversation thread (simple approach)
     private val conversationHistory = mutableListOf<ChatMessage>()
-
-    // Store context for the *last sent* nagging notification
-    private var lastNagContext: NagContext? = null
-    data class NagContext(val appName: String, val sessionTimeMs: Long, val dailyTimeMs: Long)
 
     // Track previous state for clearing history
     @Volatile private var wasPreviouslyWasteful = false
@@ -131,9 +129,8 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
-                // Pass the stored context when handling reply
-                handleReply(intent, lastNagContext)
-                lastNaggingNotificationTime.set(0) 
+                handleReply(intent)
+                lastNaggingNotificationTime.set(0)
             }
             else -> {
                 Log.d(TAG, "onStartCommand: Default action - ensuring monitoring is started.")
@@ -231,7 +228,6 @@ class AppUsageMonitorService : Service() {
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
             Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
             conversationHistory.clear()
-            lastNagContext = null // Clear context too
             // Optionally cancel the conversation notification if it's showing
             // notificationManager.cancel(NOTIFICATION_ID)
         }
@@ -288,13 +284,12 @@ class AppUsageMonitorService : Service() {
 
             if (timeSinceLastNag >= naggingIntervalSeconds * 1000) {
                 Log.d(TAG, "Nagging interval passed for wasteful app '$detectedApp'. Showing/Updating conversation notification.")
-                // Store context for potential replies
-                lastNagContext = NagContext(
-                     appName = getReadableAppName(detectedApp),
-                     sessionTimeMs = sessionWastedTime.get(),
-                     dailyTimeMs = dailyWastedTime.get()
-                 )
-                sendNotification() // Calls showConversationNotification without clearing history
+                // *** Get current context to pass ***
+                val currentAppName = getReadableAppName(detectedApp)
+                val currentSessionMs = sessionWastedTime.get()
+                val currentDailyMs = dailyWastedTime.get()
+
+                sendNotification(currentAppName, currentSessionMs, currentDailyMs)
                 lastNaggingNotificationTime.set(currentTime)
             } else { /* Log still within interval */ }
         } else {
@@ -319,28 +314,26 @@ class AppUsageMonitorService : Service() {
         return wastefulApps.contains(packageName)
     }
 
-    private fun handleReply(intent: Intent, context: NagContext?) {
+    private fun handleReply(intent: Intent) {
         val remoteInput = RemoteInput.getResultsFromIntent(intent)
         if (remoteInput != null) {
             val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
             if (!replyText.isNullOrEmpty()) {
                 Log.i(TAG, "User replied: '$replyText'")
 
-                if (context == null) {
-                    Log.e(TAG, "Cannot process reply: Context from original notification is missing.")
-                     // Show error state in notification?
-                     conversationHistory.add(ChatMessage("(Error: Missing context for reply)", System.currentTimeMillis(), aiPerson, false))
-                     showConversationNotification() // Update notification with error
-                     return
-                }
+                // *** Extract context from Intent extras ***
+                val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
+                val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
+                val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
+                
+                Log.d(TAG, "Context extracted from reply intent: App=$appName, Sess=$sessionMs, Daily=$dailyMs")
 
                 // Add user message to history
                 val userMessage = ChatMessage(replyText, System.currentTimeMillis(), userPerson, true)
                 conversationHistory.add(userMessage)
-
-                // Send to AI using the *original* context
-                // The AI function will call showConversationNotification after completion/error
-                sendToAI(context.appName, context.sessionTimeMs, context.dailyTimeMs, replyText)
+                
+                // Send to AI using the extracted context
+                sendToAI(appName, sessionMs, dailyMs, replyText)
 
             } else { Log.w(TAG, "Received empty reply.") }
         } else { Log.w(TAG, "Could not extract remote input from reply intent.") }
@@ -401,52 +394,44 @@ class AppUsageMonitorService : Service() {
              conversationHistory.add(messageToAdd)
             
             // *** Update notification ONCE here after processing is complete ***
-            showConversationNotification()
+            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         }
     }
 
-    // Initial/Recurring notification prompt during wasteful use
-    private fun sendNotification() {
-        // REMOVED: conversationHistory.clear()
-        // REMOVED: Adding initial message here
-        Log.d(TAG, "sendNotification called: Triggering update/display of conversation notification.")
-        // Just show the current state of the conversation history
-        showConversationNotification()
+    // Modified to accept context
+    private fun sendNotification(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        Log.d(TAG, "sendNotification called: Triggering update/display with context: App=$appName")
+        // Pass context to showConversationNotification
+        showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
     }
 
-    // Builds and posts/updates the conversation notification
-    private fun showConversationNotification() {
-        // Add initial prompt IF history is empty
+    // Modified to accept context and add it to replyIntent extras
+    private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
         if (conversationHistory.isEmpty()) {
-             Log.d(TAG, "Conversation history empty, adding initial prompt.")
              val initialMessage = ChatMessage("How is it going?", System.currentTimeMillis(), aiPerson, false)
              conversationHistory.add(initialMessage)
         }
-        // Log after potential modification
         Log.d(TAG, "showConversationNotification called. History size: ${conversationHistory.size}")
-        val currentSessionAppName = getReadableAppName(currentApp ?: "Unknown")
 
-        // --- Remote Input Action --- 
-        val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run {
-            setLabel("Reply...")
-            build()
-        }
+        // --- Remote Input Action with Context --- 
+        val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run { setLabel("Reply...").build() }
         val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
             action = ACTION_HANDLE_REPLY
+            // *** Add context as extras ***
+            putExtra(EXTRA_APP_NAME, appName)
+            putExtra(EXTRA_SESSION_TIME_MS, sessionTimeMs)
+            putExtra(EXTRA_DAILY_TIME_MS, dailyTimeMs)
         }
         val replyPendingIntent: PendingIntent = PendingIntent.getService(this, NOTIFICATION_ID, replyIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
         val action: NotificationCompat.Action = NotificationCompat.Action.Builder(R.drawable.ic_launcher_foreground, "Reply", replyPendingIntent)
             .addRemoteInput(remoteInput)
             .setAllowGeneratedReplies(true)
             .build()
-        // -----------------------------------------------
 
         // --- Build MessagingStyle --- 
         val messagingStyle = NotificationCompat.MessagingStyle(userPerson)
-             // Title might need adjustment if currentApp is null briefly
-            .setConversationTitle("Time Coach ($currentSessionAppName)") 
+            .setConversationTitle("Time Coach ($appName)") // Use passed appName
             .setGroupConversation(false)
-        
         conversationHistory.forEach { msg ->
             val notificationMessage = NotificationCompat.MessagingStyle.Message(
                 msg.text, msg.timestamp, msg.sender
@@ -455,16 +440,15 @@ class AppUsageMonitorService : Service() {
         }
         // ----------------------------
         
-        // --- Build Notification --- 
+        // --- Build Notification (Confirm HIGH priority) --- 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setStyle(messagingStyle)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(false)
-            .setOngoing(false)
+            .setPriority(NotificationCompat.PRIORITY_HIGH) // Confirm HIGH priority
+            .setAutoCancel(false) 
+            .setOngoing(false) 
             .addAction(action)
             
-         // Update content text based on last message
          val contentText = conversationHistory.lastOrNull()?.text ?: "Time check..."
          notificationBuilder.setContentText(contentText)
 
@@ -512,7 +496,7 @@ class AppUsageMonitorService : Service() {
             "No distracting app active"
         }
         Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
-        return NotificationCompat.Builder(this, STATS_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)
             .setContentTitle("Time Linter")
             .setContentText(monitoringStatus)
             .setStyle(NotificationCompat.BigTextStyle()
@@ -525,10 +509,14 @@ class AppUsageMonitorService : Service() {
                  .setSummaryText("Time Linter Stats")
             )
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+             // *** Use MIN priority for silent stats ***
+            .setPriority(NotificationCompat.PRIORITY_MIN) 
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
+            .setSound(null) 
+            .setVibrate(longArrayOf(0L)) // Ensure vibration is off
+            
+        return builder.build()
     }
 
     private fun formatDuration(millis: Long): String {
@@ -554,26 +542,35 @@ class AppUsageMonitorService : Service() {
     private fun createNotificationChannels() {
         Log.d(TAG, "createNotificationChannels called")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Log.d(TAG, "Creating channel $CHANNEL_ID")
-            val name = "Time Linter Notifications"
-            val descriptionText = "Notifications about app usage"
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            // Channel for nagging/reply notifications (HIGH importance for Heads-Up)
+             Log.d(TAG, "Creating channel $CHANNEL_ID (High Importance)")
+            val name = "Time Linter Conversations"
+            val descriptionText = "Notifications about app usage and AI replies"
+             // *** Use HIGH importance for Heads-Up ***
+            val importance = NotificationManager.IMPORTANCE_HIGH 
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
+                 // High importance channels usually bypass DND, which might be desired here?
+                 // setBypassDnd(true) 
             }
             notificationManager.createNotificationChannel(channel)
 
-            Log.d(TAG, "Creating channel $STATS_CHANNEL_ID")
+            // Channel for PERSISTENT STATS notification (MIN importance and silent)
+             Log.d(TAG, "Creating channel $STATS_CHANNEL_ID (Min Importance, Silent)")
             val statsName = "Time Linter Stats"
             val statsDescription = "Persistent notification showing usage statistics"
-            val statsChannel = NotificationChannel(STATS_CHANNEL_ID, statsName, NotificationManager.IMPORTANCE_DEFAULT).apply {
+             // *** Use MIN importance for stats channel ***
+            val statsChannel = NotificationChannel(STATS_CHANNEL_ID, statsName, NotificationManager.IMPORTANCE_MIN).apply { 
                 description = statsDescription
-                setShowBadge(false)
+                setSound(null, null) 
+                enableVibration(false)
+                setShowBadge(false) 
             }
             notificationManager.createNotificationChannel(statsChannel)
-            Log.d(TAG, "Notification channels created.")
+             Log.d(TAG, "Notification channels created.")
         } else {
-            Log.d(TAG, "Skipping channel creation (SDK < O)")
+             // On older versions, control sound/vibration directly on the Notification builder
+             Log.d(TAG, "Skipping channel creation (SDK < O)")
         }
     }
 
