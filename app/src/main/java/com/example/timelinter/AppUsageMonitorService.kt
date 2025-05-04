@@ -365,22 +365,38 @@ class AppUsageMonitorService : Service() {
         // --- Construct prompt with WAIT tool instruction --- 
         val prompt = """
         Context:
-         - Currently using app: $appName
-         - Time wasted in this session: ${formatDuration(sessionTimeMs)}
-         - Total time wasted today: ${formatDuration(dailyTimeMs)}
+         - App currently being used: $appName
+         - Time used in this session: ${formatDuration(sessionTimeMs)}
+         - Total time used on distracting apps today: ${formatDuration(dailyTimeMs)}
          
-         User's response to being asked if using the app was worth it: "$userReply"
+         User's response when asked about their current app usage: "$userReply"
          
-         Your Role: Act as a friendly but firm time management coach. Briefly acknowledge the user's reply and gently challenge them or offer a very short perspective based on the context. Keep your response concise (1-2 sentences).
+         Your Role: Act like a friendly, supportive friend who is gently checking in on the user's time management. Acknowledge their reply empathetically. Your goal is to help them be mindful, not to strictly enforce rules. Be concise (1-2 sentences).
          
-         Tools use: a new line contianing # <tool name> <eventual tool parameters>.
-         Tools can be the only anser on an addition to a regular message, which if present will still be displayed. 
-         Tools Available: 
-         - WAIT. If the user convinces you that we are in one of these situations:
-          * they have time to waste and nothing better to do
-          * they were very productinve and deserve a break
-          * they are very stressed, they need a break, and you feel further nagging is currently unproductive
-          then output on a new line: `# WAIT [minutes]` where [minutes] is a number (e.g., `# WAIT 15`). This will pause further nags for that duration. Choose a number of minutes to pasue appropriate to the situation.
+         Tools use: A tool command MUST be on its own new line. Example: `# WAIT 30`. It can be the only response or follow a message.
+         Tools Available:
+         - WAIT: If the user's reply convincingly suggests they genuinely deserve or need a break, for example:
+          * they just finished hard work and deserve a break
+          * they are very stressed and need a pause
+          * they genuinely are in a situation where there is nothing better they can do
+        then USE this tool. Output `# WAIT [minutes]` on a new line, choosing a reasonable duration (e.g., 15-60 minutes) based on their reason. You can optionally add a brief confirmation message before the tool line.
+         
+         Example Interaction (User deserves break):
+         User: I just closed a million dollar contract!
+         AI Response:
+         Wow, congratulations! Definitely take a break.
+         # WAIT 60
+
+         Example Interaction (Nothing better):
+         User: Yeah, I'm on the toilet.
+         AI Response: Seems a great time for Duolingo! 
+         User: I just won my league.
+         AI Response: Impressive! Mhh... any unaswered messages?
+         User: All caught up. Really, no one needs me more than cat videos right now.
+         AI response: Alright, enjoy the downtime!
+         # WAIT 10
+
+         If the WAIT tool isn't used, just provide your friendly check-in response based on the context and user reply.
          
          AI Response:
          """.trimIndent()
