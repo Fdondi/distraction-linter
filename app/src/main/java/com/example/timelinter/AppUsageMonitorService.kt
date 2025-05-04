@@ -85,6 +85,9 @@ class AppUsageMonitorService : Service() {
     // Track previous state for clearing history
     @Volatile private var wasPreviouslyWasteful = false
 
+    // Timestamp until nagging is paused by AI command
+    private val naggingPausedUntil = AtomicLong(0)
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
@@ -224,6 +227,16 @@ class AppUsageMonitorService : Service() {
         val isCurrentlyWasteful = isWastefulApp(detectedApp)
         Log.d(TAG, "App Check: Detected='$detectedApp', Current='$currentApp', IsWasteful=$isCurrentlyWasteful, WasWasteful=$wasPreviouslyWasteful")
 
+        // *** Check if nagging is paused ***
+        val now = System.currentTimeMillis()
+        if (now < naggingPausedUntil.get()) {
+            Log.v(TAG, "Nagging is paused until ${Date(naggingPausedUntil.get())}. Skipping nag check.")
+            // Still need to update previous state and log finish
+            wasPreviouslyWasteful = isCurrentlyWasteful
+            Log.d(TAG, "checkAppUsage finished (Nagging Paused). Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
+            return // Skip the rest of the nagging logic
+        }
+
         // *** Clear history on transition from wasteful to non-wasteful ***
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
             Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
@@ -279,8 +292,7 @@ class AppUsageMonitorService : Service() {
 
         // Send nagging notification check
         if (isCurrentlyWasteful) {
-            val currentTime = System.currentTimeMillis()
-            val timeSinceLastNag = currentTime - lastNaggingNotificationTime.get()
+            val timeSinceLastNag = now - lastNaggingNotificationTime.get()
 
             if (timeSinceLastNag >= naggingIntervalSeconds * 1000) {
                 Log.d(TAG, "Nagging interval passed for wasteful app '$detectedApp'. Showing/Updating conversation notification.")
@@ -290,7 +302,7 @@ class AppUsageMonitorService : Service() {
                 val currentDailyMs = dailyWastedTime.get()
 
                 sendNotification(currentAppName, currentSessionMs, currentDailyMs)
-                lastNaggingNotificationTime.set(currentTime)
+                lastNaggingNotificationTime.set(now)
             } else { /* Log still within interval */ }
         } else {
              // Reset nag timer immediately if not wasteful
@@ -298,7 +310,6 @@ class AppUsageMonitorService : Service() {
              // Log.v(TAG, "Non-wasteful app active, resetting nagging timer.")
         }
         
-        // *** Update previous state for next check ***
         wasPreviouslyWasteful = isCurrentlyWasteful
 
         Log.d(TAG, "checkAppUsage finished. Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
@@ -348,8 +359,8 @@ class AppUsageMonitorService : Service() {
             return
         }
         
-        // --- Construct prompt (Consider adding history here later) ---
-        val basePrompt = """
+        // --- Construct prompt with WAIT tool instruction --- 
+        val prompt = """
         Context:
          - Currently using app: $appName
          - Time wasted in this session: ${formatDuration(sessionTimeMs)}
@@ -359,24 +370,55 @@ class AppUsageMonitorService : Service() {
          
          Your Role: Act as a friendly but firm time management coach. Briefly acknowledge the user's reply and gently challenge them or offer a very short perspective based on the context. Keep your response concise (1-2 sentences).
          
+         Tools use: a new line contianing # <tool name> <eventual tool parameters>.
+         Tools can be the only anser on an addition to a regular message, which if present will still be displayed. 
+         Tools Available: 
+         - WAIT. If the user convinces you that we are in one of these situations:
+          * they have time to waste and nothing better to do
+          * they were very productinve and deserve a break
+          * they are very stressed, they need a break, and you feel further nagging is currently unproductive
+          then output on a new line: `# WAIT [minutes]` where [minutes] is a number (e.g., `# WAIT 15`). This will pause further nags for that duration. Choose a number of minutes to pasue appropriate to the situation.
+         
          AI Response:
          """.trimIndent()
-         
-         // Simple history injection (can be improved)
-         // val historyString = conversationHistory.takeLast(4).joinToString("\n") { "${if(it.isUser) "User" else "AI"}: ${it.text}" }
-         // val fullPrompt = "$historyString\n\n$basePrompt" 
-         val fullPrompt = basePrompt // Keep it simple for now
 
-        Log.d(TAG, "Sending prompt to Gemini: $fullPrompt")
+        Log.d(TAG, "Sending prompt to Gemini: $prompt")
         serviceScope.launch {
             var aiResponseText: String? = null
             var errorMessage: String? = null
+            var pauseMinutes: Int? = null
+
             try {
                 val model = generativeModel ?: throw IllegalStateException("Model became null unexpectedly")
-                val response = model.generateContent(fullPrompt)
-                aiResponseText = response.text
-                if (aiResponseText == null) {
-                    Log.w(TAG, "Gemini response was empty or not text.")
+                val response = model.generateContent(prompt)
+                val rawResponse = response.text
+                Log.d(TAG, "Raw Gemini Response: $rawResponse")
+
+                if (rawResponse != null) {
+                    // Check for # WAIT command
+                    val lines = rawResponse.lines()
+                    val waitCommand = lines.find { it.startsWith("# WAIT") }
+                    if (waitCommand != null) {
+                         try {
+                             pauseMinutes = waitCommand.removePrefix("# WAIT").trim().toIntOrNull()
+                             if (pauseMinutes != null && pauseMinutes > 0) {
+                                 Log.i(TAG, "AI requested WAIT for $pauseMinutes minutes.")
+                                 aiResponseText = "Okay, pausing nags for $pauseMinutes minute${if (pauseMinutes > 1) "s" else ""}." // User-friendly message
+                             } else {
+                                 Log.w(TAG, "Invalid minutes in WAIT command: $waitCommand")
+                                 aiResponseText = rawResponse // Fallback to showing raw response if WAIT format is bad
+                                 pauseMinutes = null // Ensure pause isn't activated
+                             }
+                         } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing WAIT command", e)
+                             aiResponseText = rawResponse // Fallback
+                             pauseMinutes = null
+                         }
+                    } else {
+                        aiResponseText = rawResponse // Normal response
+                    }
+                } else {
+                    Log.w(TAG, "Gemini response was null.")
                     errorMessage = "(Error getting response)"
                 }
             } catch (e: Exception) {
@@ -386,14 +428,22 @@ class AppUsageMonitorService : Service() {
 
             // Add AI response or error message to history
             val messageToAdd = if (aiResponseText != null) {
-                 Log.i(TAG, "Gemini Response: $aiResponseText")
+                 Log.i(TAG, "Processed AI Response/Action: $aiResponseText")
                  ChatMessage(aiResponseText, System.currentTimeMillis(), aiPerson, false)
             } else {
                  ChatMessage(errorMessage ?: "(Unknown Error)", System.currentTimeMillis(), aiPerson, false)
             }
-             conversationHistory.add(messageToAdd)
+            conversationHistory.add(messageToAdd)
             
-            // *** Update notification ONCE here after processing is complete ***
+            // Set the pause if minutes were parsed
+            if (pauseMinutes != null && pauseMinutes > 0) {
+                 val pauseMillis = TimeUnit.MINUTES.toMillis(pauseMinutes.toLong())
+                 naggingPausedUntil.set(System.currentTimeMillis() + pauseMillis)
+                 Log.i(TAG, "Nagging paused until: ${Date(naggingPausedUntil.get())}")
+                 // Optionally cancel the stats notification during pause?
+            }
+            
+            // Update notification ONCE here
             showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         }
     }
