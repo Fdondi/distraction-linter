@@ -90,7 +90,7 @@ class AppUsageMonitorService : Service() {
         if (!apiKey.isNullOrEmpty()) {
             try {
                 generativeModel = GenerativeModel(
-                    modelName = "gemini-1.5-flash-latest", // Or another suitable model
+                    modelName = "gemini-2.0-flash-lite"
                     apiKey = apiKey
                     // Add safetySettings and generationConfig if needed
                 )
