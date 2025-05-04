@@ -8,15 +8,18 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -26,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private var showUsageAccessDialog by mutableStateOf(false)
     private var showNotificationPermissionRationale by mutableStateOf(false)
     private var isMonitoringActive by mutableStateOf(false)
+    private var apiKeyPresent by mutableStateOf(false)
 
     // Launcher for Notification Permission
     private val requestNotificationPermissionLauncher = registerForActivityResult(
@@ -43,6 +47,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Check for API Key initially
+        apiKeyPresent = ApiKeyManager.hasKey(this)
+
         setContent {
             MaterialTheme {
                 TimeLinterApp(
@@ -53,16 +60,23 @@ class MainActivity : ComponentActivity() {
                     onGoToUsageAccessSettings = { openUsageAccessSettings() },
                     showNotificationPermissionRationale = showNotificationPermissionRationale,
                     onDismissNotificationPermissionRationale = { showNotificationPermissionRationale = false },
-                    onRequestNotificationPermissionAgain = { requestNotificationPermission() }
+                    onRequestNotificationPermissionAgain = { requestNotificationPermission() },
+                    apiKeyPresent = apiKeyPresent,
+                    onSaveApiKey = {
+                        ApiKeyManager.saveKey(this, it)
+                        apiKeyPresent = true
+                    }
                 )
             }
         }
-        // Initial check in case service was running but activity was killed
-        isMonitoringActive = isServiceRunning(AppUsageMonitorService::class.java) 
+        // Update monitoring state based on service status
+        isMonitoringActive = isServiceRunning(AppUsageMonitorService::class.java)
     }
 
     override fun onResume() {
         super.onResume()
+        // Re-check API key presence on resume
+        apiKeyPresent = ApiKeyManager.hasKey(this)
         // Re-check permissions if monitoring was supposed to be active
         if (isMonitoringActive && (!hasNotificationPermission() || !hasUsageStatsPermission())) {
             isMonitoringActive = false // Stop monitoring if permission revoked
@@ -72,6 +86,12 @@ class MainActivity : ComponentActivity() {
 
     private fun attemptStartMonitoring() {
         if (!isMonitoringActive) {
+             // 0. Check API Key first
+            if (!ApiKeyManager.hasKey(this)) {
+                 Log.w("MainActivity", "API Key not found. Cannot start monitoring.")
+                 // Optionally show a Toast or Snackbar message here
+                 return // Stop the process if no key
+            }
             // 1. Check Notification Permission first (Android 13+)
             if (hasNotificationPermission()) {
                  // 2. If Notification permission granted, check Usage Access
@@ -173,8 +193,12 @@ fun TimeLinterApp(
     onGoToUsageAccessSettings: () -> Unit,
     showNotificationPermissionRationale: Boolean,
     onDismissNotificationPermissionRationale: () -> Unit,
-    onRequestNotificationPermissionAgain: () -> Unit
+    onRequestNotificationPermissionAgain: () -> Unit,
+    apiKeyPresent: Boolean,
+    onSaveApiKey: (String) -> Unit
 ) {
+    var apiKeyInput by rememberSaveable { mutableStateOf("") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -182,21 +206,52 @@ fun TimeLinterApp(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        // --- API Key Input Section (Show if key not present) ---
+        if (!apiKeyPresent) {
+            Text(
+                text = "Gemini API Key Required",
+                style = MaterialTheme.typography.titleMedium
+            )
+            OutlinedTextField(
+                value = apiKeyInput,
+                onValueChange = { apiKeyInput = it },
+                label = { Text("Enter API Key") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(), // Hide the key
+                modifier = Modifier.fillMaxWidth()
+            )
+            Button(
+                onClick = { onSaveApiKey(apiKeyInput) },
+                enabled = apiKeyInput.isNotBlank() // Enable only if text is entered
+            ) {
+                Text("Save API Key")
+            }
+            Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
+        }
+
+        // --- Original UI Elements --- 
         Text(
             text = stringResource(id = R.string.app_name),
             style = MaterialTheme.typography.headlineMedium
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp)) // Adjusted spacing
 
-        Button(onClick = onToggleMonitoring) {
+        Button(
+            onClick = onToggleMonitoring,
+            enabled = apiKeyPresent
+        ) {
             Text(if (isMonitoring) "Stop Monitoring" else "Start Monitoring")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = if (isMonitoring) "Monitoring active..." else "Monitoring stopped.",
+            text = when {
+                 !apiKeyPresent -> "Please enter your API Key above."
+                 isMonitoring -> "Monitoring active..."
+                 else -> "Monitoring stopped."
+            },
             style = MaterialTheme.typography.bodyLarge
         )
 

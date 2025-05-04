@@ -11,6 +11,15 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+// Gemini SDK Imports
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.asTextOrNull
+import com.google.ai.client.generativeai.type.content
+import kotlinx.coroutines.*
+
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -18,7 +27,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.app.usage.UsageStats
 import android.app.PendingIntent
-import androidx.core.app.RemoteInput
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -42,6 +50,15 @@ class AppUsageMonitorService : Service() {
     private var currentApp: String? = null
     private var lastAppChangeTime = AtomicLong(System.currentTimeMillis())
 
+    // Coroutine scope for background tasks like API calls
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Gemini Model (initialized lazily or when key is available)
+    private var generativeModel: GenerativeModel? = null
+
+    // Use volatile for thread safety, though AtomicBoolean is often preferred
+    @Volatile private var isMonitoringScheduled = false
+
     // Action for launching discussion activity
     companion object {
         const val ACTION_DISCUSS_TIME = "com.example.timelinter.ACTION_DISCUSS_TIME"
@@ -57,6 +74,8 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "onCreate called")
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
+        initializeGeminiModel() // Attempt to initialize model on create
+
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
             startForeground(STATS_NOTIFICATION_ID, createStatsNotification())
@@ -66,41 +85,92 @@ class AppUsageMonitorService : Service() {
         }
     }
 
+    private fun initializeGeminiModel() {
+        val apiKey = ApiKeyManager.getKey(this)
+        if (!apiKey.isNullOrEmpty()) {
+            try {
+                generativeModel = GenerativeModel(
+                    modelName = "gemini-1.5-flash-latest", // Or another suitable model
+                    apiKey = apiKey
+                    // Add safetySettings and generationConfig if needed
+                )
+                Log.i(TAG, "GenerativeModel initialized successfully.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing GenerativeModel", e)
+                generativeModel = null
+            }
+        } else {
+            Log.w(TAG, "Cannot initialize GenerativeModel: API Key not found.")
+            generativeModel = null
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
                 handleReply(intent)
-                // We might want to reset lastNaggingNotificationTime here
-                // if a reply means the user acknowledged the notification.
-                // lastNaggingNotificationTime.set(0) 
+                // Reset nagging timer after reply
+                lastNaggingNotificationTime.set(0)
             }
             else -> {
-                 Log.d(TAG, "onStartCommand: Starting monitoring")
-                 // Check if already running to avoid rescheduling
-                 if (executor.isShutdown || executor.isTerminated) {
-                    startMonitoring()
-                 } else {
-                    Log.d(TAG, "Monitoring executor already running.")
-                 }
+                 Log.d(TAG, "onStartCommand: Default action - ensuring monitoring is started.")
+                 // Call startMonitoring unconditionally (it will handle duplicates)
+                 startMonitoring()
             }
         }
-        return START_STICKY
+        // Ensure model is initialized if key was added after service started
+        if (generativeModel == null) {
+             initializeGeminiModel()
+        }
+       return START_STICKY
     }
 
     private fun startMonitoring() {
-        Log.d(TAG, "startMonitoring called - scheduling checks every $checkIntervalSeconds seconds, stats update every $statsUpdateIntervalSeconds seconds")
-        // Schedule the main check frequently for accurate time tracking
-        executor.scheduleAtFixedRate({
-            Log.v(TAG, "Scheduled task running: checkAppUsage") // Use Verbose for frequent logs
-            checkAppUsage()
-        }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
+        // Prevent rescheduling if already running
+        if (isMonitoringScheduled) {
+             Log.d(TAG, "startMonitoring: Monitoring already scheduled. Skipping.")
+             return
+        }
         
-        // Schedule stats notification update less frequently
-         executor.scheduleAtFixedRate({
-             Log.d(TAG, "Scheduled task running: updateStatsNotification")
-             updateStatsNotification()
-         }, 5, statsUpdateIntervalSeconds, TimeUnit.SECONDS) // Start after a small delay, update less often
+        // Check if executor is shut down (e.g., after onDestroy -> onCreate)
+        // Recreate if necessary
+        // NOTE: This check might need refinement depending on service lifecycle edge cases.
+        // if (executor.isShutdown || executor.isTerminated) {
+        //     Log.w(TAG, "Executor was shutdown. Recreating.")
+        //     executor = Executors.newSingleThreadScheduledExecutor()
+        // }
+
+        Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
+        try {
+            // Schedule the main check frequently
+            executor.scheduleAtFixedRate({
+                // Use try-catch within scheduled tasks to prevent stopping the schedule
+                try {
+                    Log.v(TAG, "Scheduled task running: checkAppUsage")
+                    checkAppUsage()
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Error within checkAppUsage task", t)
+                }
+            }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
+
+            // Schedule stats notification update less frequently
+             executor.scheduleAtFixedRate({
+                 try {
+                    Log.d(TAG, "Scheduled task running: updateStatsNotification")
+                    updateStatsNotification()
+                 } catch (t: Throwable) {
+                    Log.e(TAG, "Error within updateStatsNotification task", t)
+                 }
+             }, 5, statsUpdateIntervalSeconds, TimeUnit.SECONDS)
+             
+             isMonitoringScheduled = true // Set flag after successful scheduling
+             Log.i(TAG, "Monitoring tasks scheduled successfully.")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scheduling monitoring tasks", e)
+             isMonitoringScheduled = false // Ensure flag is false if scheduling fails
+        }
     }
 
     private fun checkAppUsage() {
@@ -210,20 +280,16 @@ class AppUsageMonitorService : Service() {
             val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
             if (!replyText.isNullOrEmpty()) {
                 Log.i(TAG, "User replied: '$replyText'")
-                // TODO: Process the reply (send to AI, etc.)
+                notificationManager.cancel(NOTIFICATION_ID) // Cancel the input notification
 
-                // For now, let's re-post the original notification without the input action
-                // to give feedback that the reply was processed.
-                // Ideally, you might show a different notification or update the existing one.
-                // A simple approach is to cancel the original and potentially post a new one.
-                // Or update the existing one by removing the action / remote input.
-                notificationManager.cancel(NOTIFICATION_ID) // Cancel the one with the input
-                
-                // Optional: Post a temporary confirmation or just let the stats notification remain.
-                // Log.d(TAG, "Reply processed. Notification cancelled.")
-                
-                // Placeholder for sending to AI
-                sendToAI("User: $replyText\nAI:") // Example function call
+                // Get context for the AI prompt
+                val sessionMs = sessionWastedTime.get()
+                val dailyMs = dailyWastedTime.get()
+                val appName = getReadableAppName(currentApp)
+
+                // Construct the prompt and send to AI
+                sendToAI(appName, sessionMs, dailyMs, replyText)
+
             } else {
                  Log.w(TAG, "Received empty reply.")
             }
@@ -231,12 +297,59 @@ class AppUsageMonitorService : Service() {
              Log.w(TAG, "Could not extract remote input from reply intent.")
         }
     }
-    
-    // Placeholder function for AI interaction
-    private fun sendToAI(prompt: String) {
-        Log.d(TAG, "Placeholder: Sending to AI:$prompt")
-        // Here you would implement the actual API call to Gemini or another AI
-        // And potentially update the notification with the AI's response
+
+    // Function for AI interaction
+    private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long, userReply: String) {
+         if (generativeModel == null) {
+             Log.e(TAG, "Cannot send to AI: GenerativeModel not initialized (likely missing API Key).")
+             // Optionally, notify user via a Toast or a simple notification?
+             return
+         }
+         
+         // Construct the prompt
+         val prompt = """
+         Context:
+         - Currently using app: $appName
+         - Time wasted in this session: ${formatDuration(sessionTimeMs)}
+         - Total time wasted today: ${formatDuration(dailyTimeMs)}
+         
+         User's response to being asked if using the app was worth it: "$userReply"
+         
+         Your Role: Act as a friendly but firm time management coach. Briefly acknowledge the user's reply and gently challenge them or offer a very short perspective based on the context. Keep your response concise (1-2 sentences).
+         
+         AI Response:
+         """.trimIndent()
+
+        Log.d(TAG, "Sending prompt to Gemini: $prompt")
+
+        // Launch coroutine for the API call
+        serviceScope.launch {
+            try {
+                // Ensure model is not null again just in case
+                 val model = generativeModel ?: run {
+                    Log.e(TAG, "Coroutine: GenerativeModel became null unexpectedly.")
+                    return@launch
+                 }
+                 
+                val response = model.generateContent(prompt)
+
+                val aiResponseText = response.text
+                if (aiResponseText != null) {
+                    Log.i(TAG, "Gemini Response: $aiResponseText")
+                    // TODO: Update the UI - Post a new notification with the AI's reply?
+                    // For now, just logging.
+                    // Example: postAiReplyNotification(aiResponseText)
+                } else {
+                    Log.w(TAG, "Gemini response was empty or not text.")
+                    // Handle cases where the response might be blocked etc.
+                    // Log.w(TAG, "Full Response: ${response}") // Log full response for debugging
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error calling Gemini API", e)
+                // Handle API call errors (network issues, invalid key, etc.)
+            }
+        }
     }
 
     private fun sendNotification() {
@@ -401,6 +514,8 @@ class AppUsageMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
-        executor.shutdown()
+        executor.shutdownNow()
+        serviceScope.cancel()
+        isMonitoringScheduled = false // Reset flag when service is destroyed
     }
 } 

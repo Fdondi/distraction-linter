@@ -1,7 +1,26 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+// Function to read properties from local.properties
+fun getApiKey(propertyKey: String): String {
+    val properties = Properties()
+    // Ensure rootProject points to the correct directory containing local.properties
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        try {
+            properties.load(FileInputStream(localPropertiesFile))
+            return properties.getProperty(propertyKey) ?: ""
+        } catch (e: Exception) {
+            println("Warning: Could not load local.properties file: ${e.message}")
+        }
+    }
+    return "" // Return empty string if file or key not found
 }
 
 android {
@@ -36,6 +55,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // Keep true if other buildConfig fields exist or might be added
     }
 }
 
@@ -56,4 +76,14 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    // AndroidX Security for EncryptedSharedPreferences
+    implementation(libs.androidx.security.crypto)
+
+    // Google AI (Gemini SDK)
+    // Ensure this matches your libs.versions.toml or use the direct string
+    implementation(libs.google.ai.client.generativeai)
+
+    // Required for coroutines used by the SDK
+    implementation(libs.kotlinx.coroutines.android)
 }
