@@ -207,6 +207,9 @@ class AppUsageMonitorService : Service() {
                     if (usageStats.packageName == applicationContext.packageName) {
                         continue 
                     }
+                    if (usageStats.packageName == ""){
+                        continue
+                    }
                     if (recentStat == null || usageStats.lastTimeUsed > recentStat.lastTimeUsed) {
                         recentStat = usageStats
                     }
