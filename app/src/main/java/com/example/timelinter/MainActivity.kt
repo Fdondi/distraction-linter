@@ -13,6 +13,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -53,27 +55,36 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                TimeLinterApp(
-                    isMonitoring = isMonitoringActive,
-                    onToggleMonitoring = { attemptStartMonitoring() },
-                    showUsageAccessDialog = showUsageAccessDialog,
-                    onDismissUsageAccessDialog = { showUsageAccessDialog = false },
-                    onGoToUsageAccessSettings = { openUsageAccessSettings() },
-                    showNotificationPermissionRationale = showNotificationPermissionRationale,
-                    onDismissNotificationPermissionRationale = { showNotificationPermissionRationale = false },
-                    onRequestNotificationPermissionAgain = { requestNotificationPermission() },
-                    apiKeyPresent = apiKeyPresent,
-                    onSaveApiKey = {
-                        ApiKeyManager.saveKey(this, it)
-                        apiKeyPresent = true
-                    },
-                    showHeadsUpInfoDialog = showHeadsUpInfoDialog,
-                    onDismissHeadsUpInfoDialog = {
-                        showHeadsUpInfoDialog = false
-                        startMonitoringServiceIfPermitted()
-                    },
-                    onGoToChannelSettings = { openNotificationChannelSettings() }
-                )
+                var showSettings by remember { mutableStateOf(false) }
+
+                if (showSettings) {
+                    SettingsScreen(
+                        onNavigateBack = { showSettings = false }
+                    )
+                } else {
+                    TimeLinterApp(
+                        isMonitoring = isMonitoringActive,
+                        onToggleMonitoring = { attemptStartMonitoring() },
+                        showUsageAccessDialog = showUsageAccessDialog,
+                        onDismissUsageAccessDialog = { showUsageAccessDialog = false },
+                        onGoToUsageAccessSettings = { openUsageAccessSettings() },
+                        showNotificationPermissionRationale = showNotificationPermissionRationale,
+                        onDismissNotificationPermissionRationale = { showNotificationPermissionRationale = false },
+                        onRequestNotificationPermissionAgain = { requestNotificationPermission() },
+                        apiKeyPresent = apiKeyPresent,
+                        onSaveApiKey = {
+                            ApiKeyManager.saveKey(this, it)
+                            apiKeyPresent = true
+                        },
+                        showHeadsUpInfoDialog = showHeadsUpInfoDialog,
+                        onDismissHeadsUpInfoDialog = {
+                            showHeadsUpInfoDialog = false
+                            startMonitoringServiceIfPermitted()
+                        },
+                        onGoToChannelSettings = { openNotificationChannelSettings() },
+                        onOpenSettings = { showSettings = true }
+                    )
+                }
             }
         }
         // Update monitoring state based on service status
@@ -120,22 +131,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handlePermissionSuccess() {
-         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // *** Check if info dialog has been shown before ***
-            if (!ApiKeyManager.hasHeadsUpInfoBeenShown(this)) {
-                // Show dialog AND set the flag
-                showHeadsUpInfoDialog = true
-                ApiKeyManager.setHeadsUpInfoShown(this)
-                // Service start is deferred until dialog is dismissed
-            } else {
-                 // Info already shown, proceed to start service directly
-                 Log.d("MainActivity", "Heads-up info previously shown, skipping dialog.")
-                 startMonitoringServiceIfPermitted()
-            }
-         } else {
-            // On older versions, just start the service
+        // *** Check if info dialog has been shown before ***
+        if (!ApiKeyManager.hasHeadsUpInfoBeenShown(this)) {
+            // Show dialog AND set the flag
+            showHeadsUpInfoDialog = true
+            ApiKeyManager.setHeadsUpInfoShown(this)
+            // Service start is deferred until dialog is dismissed
+        } else {
+             // Info already shown, proceed to start service directly
+             Log.d("MainActivity", "Heads-up info previously shown, skipping dialog.")
              startMonitoringServiceIfPermitted()
-         }
+        }
     }
 
     private fun startMonitoringServiceIfPermitted() {
@@ -174,7 +180,7 @@ class MainActivity : ComponentActivity() {
 
     private fun hasUsageStatsPermission(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.checkOpNoThrow(
+        val mode = appOps.unsafeCheckOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS,
             android.os.Process.myUid(),
             packageName
@@ -189,18 +195,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openNotificationChannelSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
-                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                putExtra(Settings.EXTRA_CHANNEL_ID, AppUsageMonitorService.CHANNEL_ID) 
-            }
-            try {
-                 startActivity(intent)
-            } catch (e: Exception) {
-                 Log.e("MainActivity", "Error opening channel settings", e)
-                 openAppNotificationSettings()
-            }
-        } else {
+        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            putExtra(Settings.EXTRA_CHANNEL_ID, AppUsageMonitorService.CHANNEL_ID)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error opening channel settings", e)
             openAppNotificationSettings()
         }
         showHeadsUpInfoDialog = false
@@ -220,11 +222,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startMonitoringService() {
         val intent = Intent(this, AppUsageMonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-             startForegroundService(intent) // Use foreground start for O+
-        } else {
-             startService(intent)
-        }
+        startForegroundService(intent)
     }
 
     private fun stopMonitoringService() {
@@ -232,20 +230,17 @@ class MainActivity : ComponentActivity() {
         stopService(intent)
     }
 
-    // Helper to check if a service is running (basic check)
+    // Helper to check if a service is running
     private fun isServiceRunning(serviceClass: Class<*>): Boolean {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        for (service in manager.getRunningServices(Integer.MAX_VALUE)) {
-            if (serviceClass.name == service.service.className) {
-                if (service.foreground) { // Check if it's a foreground service
-                     return true
-                }
-            }
+        // Since we're targeting API 29+, we can only see our own services
+        return manager.getRunningServices(Integer.MAX_VALUE).any { service ->
+            serviceClass.name == service.service.className && service.foreground
         }
-        return false
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimeLinterApp(
     isMonitoring: Boolean,
@@ -260,121 +255,128 @@ fun TimeLinterApp(
     onSaveApiKey: (String) -> Unit,
     showHeadsUpInfoDialog: Boolean,
     onDismissHeadsUpInfoDialog: () -> Unit,
-    onGoToChannelSettings: () -> Unit
+    onGoToChannelSettings: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     var apiKeyInput by rememberSaveable { mutableStateOf("") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // --- API Key Input Section (Show if key not present) ---
-        if (!apiKeyPresent) {
-            Text(
-                text = "Gemini API Key Required",
-                style = MaterialTheme.typography.titleMedium
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(stringResource(id = R.string.app_name)) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
             )
-            OutlinedTextField(
-                value = apiKeyInput,
-                onValueChange = { apiKeyInput = it },
-                label = { Text("Enter API Key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), // Hide the key
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = { onSaveApiKey(apiKeyInput) },
-                enabled = apiKeyInput.isNotBlank() // Enable only if text is entered
-            ) {
-                Text("Save API Key")
-            }
-            Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
         }
-
-        // --- Original UI Elements --- 
-        Text(
-            text = stringResource(id = R.string.app_name),
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(16.dp)) // Adjusted spacing
-
-        Button(
-            onClick = onToggleMonitoring,
-            enabled = apiKeyPresent
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(if (isMonitoring) "Stop Monitoring" else "Start Monitoring")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = when {
-                 !apiKeyPresent -> "Please enter your API Key above."
-                 isMonitoring -> "Monitoring active..."
-                 else -> "Monitoring stopped."
-            },
-            style = MaterialTheme.typography.bodyLarge
-        )
-
-        // Dialog for Usage Access Permission
-        if (showUsageAccessDialog) {
-            AlertDialog(
-                onDismissRequest = onDismissUsageAccessDialog,
-                title = { Text("Usage Access Required") },
-                text = { Text("Time Linter needs Usage Access permission to monitor app usage. Please grant it in the system settings.") },
-                confirmButton = {
-                    Button(onClick = onGoToUsageAccessSettings) {
-                        Text("Go to Settings")
-                    }
-                },
-                dismissButton = {
-                    Button(onClick = onDismissUsageAccessDialog) {
-                        Text("Cancel")
-                    }
+            // --- API Key Input Section (Show if key not present) ---
+            if (!apiKeyPresent) {
+                Text(
+                    text = "Gemini API Key Required",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                OutlinedTextField(
+                    value = apiKeyInput,
+                    onValueChange = { apiKeyInput = it },
+                    label = { Text("Enter API Key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), // Hide the key
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = { onSaveApiKey(apiKeyInput) },
+                    enabled = apiKeyInput.isNotBlank() // Enable only if text is entered
+                ) {
+                    Text("Save API Key")
                 }
-            )
-        }
+                Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
+            }
 
-        // Dialog for Notification Permission Rationale
-        if (showNotificationPermissionRationale) {
-             AlertDialog(
-                onDismissRequest = onDismissNotificationPermissionRationale,
-                title = { Text("Notification Permission Needed") },
-                text = { Text("Notifications are required for Time Linter to function correctly, especially the persistent status notification. Please grant the permission to enable monitoring.") },
-                confirmButton = {
-                    Button(onClick = onRequestNotificationPermissionAgain) {
-                        Text("Request Again")
-                    }
+            Button(
+                onClick = onToggleMonitoring,
+                enabled = apiKeyPresent
+            ) {
+                Text(if (isMonitoring) "Stop Monitoring" else "Start Monitoring")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = when {
+                    !apiKeyPresent -> "Please enter your API Key above."
+                    isMonitoring -> "Monitoring active..."
+                    else -> "Monitoring stopped."
                 },
-                 dismissButton = {
-                     Button(onClick = onDismissNotificationPermissionRationale) {
-                         Text("Cancel")
+                style = MaterialTheme.typography.bodyLarge
+            )
+
+            // Dialog for Usage Access Permission
+            if (showUsageAccessDialog) {
+                AlertDialog(
+                    onDismissRequest = onDismissUsageAccessDialog,
+                    title = { Text("Usage Access Required") },
+                    text = { Text("Time Linter needs Usage Access permission to monitor app usage. Please grant it in the system settings.") },
+                    confirmButton = {
+                        Button(onClick = onGoToUsageAccessSettings) {
+                            Text("Go to Settings")
+                        }
+                    },
+                    dismissButton = {
+                        Button(onClick = onDismissUsageAccessDialog) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            // Dialog for Notification Permission Rationale
+            if (showNotificationPermissionRationale) {
+                 AlertDialog(
+                    onDismissRequest = onDismissNotificationPermissionRationale,
+                    title = { Text("Notification Permission Needed") },
+                    text = { Text("Notifications are required for Time Linter to function correctly, especially the persistent status notification. Please grant the permission to enable monitoring.") },
+                    confirmButton = {
+                        Button(onClick = onRequestNotificationPermissionAgain) {
+                            Text("Request Again")
+                        }
+                    },
+                     dismissButton = {
+                         Button(onClick = onDismissNotificationPermissionRationale) {
+                             Text("Cancel")
+                         }
                      }
-                 }
-            )
-        }
+                )
+            }
 
-        // Dialog for Heads-Up/Pop-on-screen Info
-        if (showHeadsUpInfoDialog) {
-            AlertDialog(
-                onDismissRequest = onDismissHeadsUpInfoDialog,
-                title = { Text("Notification Style Suggestion") },
-                text = { Text("For the best experience, allow Time Linter's 'Conversation' notifications to 'Pop on screen'. This lets the AI reply appear immediately over other apps. You can check this in the channel settings.") },
-                confirmButton = {
-                    Button(onClick = onGoToChannelSettings) {
-                        Text("Open Settings")
+            // Dialog for Heads-Up/Pop-on-screen Info
+            if (showHeadsUpInfoDialog) {
+                AlertDialog(
+                    onDismissRequest = onDismissHeadsUpInfoDialog,
+                    title = { Text("Notification Style Suggestion") },
+                    text = { Text("For the best experience, allow Time Linter's 'Conversation' notifications to 'Pop on screen'. This lets the AI reply appear immediately over other apps. You can check this in the channel settings.") },
+                    confirmButton = {
+                        Button(onClick = onGoToChannelSettings) {
+                            Text("Open Settings")
+                        }
+                    },
+                    dismissButton = {
+                        Button(onClick = onDismissHeadsUpInfoDialog) {
+                            Text("Maybe Later")
+                        }
                     }
-                },
-                dismissButton = {
-                    Button(onClick = onDismissHeadsUpInfoDialog) {
-                        Text("Maybe Later")
-                    }
-                }
-            )
+                )
+            }
         }
     }
 }
