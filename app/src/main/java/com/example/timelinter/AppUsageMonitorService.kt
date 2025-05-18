@@ -39,6 +39,7 @@ class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
     private val executor = Executors.newSingleThreadScheduledExecutor()
     private lateinit var notificationManager: NotificationManager
+    private lateinit var aiManager: AIInteractionManager
 
     companion object {
         // Notification Channel IDs
@@ -99,8 +100,7 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "onCreate called")
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
-        loadPrompts() // Load prompts early
-        initializeGeminiModel() // Initialize model (will use loaded system prompt if available)
+        aiManager = AIInteractionManager(this)
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
@@ -115,65 +115,12 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    private fun loadPrompts() {
-        systemPromptFixed = loadRawResource(R.raw.gemini_fixed_system_prompt)
-        if (systemPromptFixed == null) {
-            Log.e(TAG, "Failed to load fixed system prompt!")
-        }
-        systemPromptVariableTemplate = loadRawResource(R.raw.gemini_variable_system_prompt_template)
-        if (systemPromptVariableTemplate == null) {
-            Log.e(TAG, "Failed to load variable system prompt template!")
-        }
-        firstAIMessage = loadRawResource(R.raw.gemini_first_ai_message)
-        if (firstAIMessage == null) {
-            Log.e(TAG, "Failed to load first AI message!")
-        }
-    }
-
-    private fun loadRawResource(resId: Int): String? {
-        return try {
-            resources.openRawResource(resId).use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                    reader.readText()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading raw resource: $resId", e)
-            null
-        }
-    }
-
-    private fun initializeGeminiModel() {
-        val apiKey = ApiKeyManager.getKey(this)
-        if (systemPrompt == null) {
-             Log.w(TAG, "System prompt not loaded yet, cannot initialize model.")
-             return // Or retry loading?
-        }
-        if (!apiKey.isNullOrEmpty()) {
-            try {
-                generativeModel = GenerativeModel(
-                    modelName = "gemini-2.0-flash-lite",
-                    apiKey = apiKey,
-                    // Pass the loaded system instruction here
-                    systemInstruction = content(role="system") { text(systemPrompt!!) }
-                )
-                Log.i(TAG, "GenerativeModel initialized successfully with system prompt.")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing GenerativeModel", e)
-                generativeModel = null
-            }
-        } else {
-            Log.w(TAG, "Cannot initialize GenerativeModel: API Key not found.")
-            generativeModel = null
-        }
-    }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
         // Ensure model is initialized if API key was added later
         if (generativeModel == null) { 
-             loadPrompts() // Reload prompts in case they failed initially
-             initializeGeminiModel() 
+             aiManager.loadPrompts() // Reload prompts in case they failed initially
+             generativeModel = aiManager.initializeGeminiModel() 
         }
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
@@ -480,87 +427,23 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "sendNotification called for $appName. History empty? ${conversationHistory.isEmpty()}")
         if (conversationHistory.isEmpty()) {
             // History is empty, show initial message without AI
-            val formattedFirstAIMessage = firstAIMessage?.replace("{{APP_NAME}}", appName) ?: "Time to take a break from $appName!"
-            generateInitialAIResponse(formattedFirstAIMessage, appName, sessionTimeMs, dailyTimeMs)
+            val initialMessage = aiManager.getInitialMessage(appName)
+            val message = ChatMessage(initialMessage, System.currentTimeMillis(), aiPerson, false)
+            conversationHistory.add(message)
+            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         } else {
             // History exists, generate subsequent AI response
             Log.d(TAG, "History exists, generating subsequent AI response.")
-            generateSubsequentAIResponse(appName, sessionTimeMs, dailyTimeMs)
-        }
-    }
-
-    // New function to generate the VERY FIRST AI response in a conversation
-    private fun generateInitialAIResponse(formattedFirstAIMessage: String, appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        // For initial message, just show the formatted first AI message without calling AI
-        val initialMessage = ChatMessage(formattedFirstAIMessage, System.currentTimeMillis(), aiPerson, false)
-        conversationHistory.add(initialMessage)
-        
-        // Update notification to show the initial message
-        showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-    }
-
-    // New function to handle subsequent AI interactions
-    private fun generateSubsequentAIResponse(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        val currentModel = generativeModel ?: return
-
-        serviceScope.launch {
-            var aiResponseText: String? = null
-            var errorMessage: String? = null
-            
-            try {
-                // Build the full prompt structure
-                val contents = mutableListOf<Content>()
-                
-                // Add fixed system prompt
-                systemPromptFixed?.let { fixed ->
-                    contents.add(content(role = "system") { text(fixed) })
-                }
-                
-                // Add variable system prompt
-                val formattedSystemVariablePrompt = systemPromptVariableTemplate
-                    .replace("{{APP_NAME}}", appName)
-                    .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
-                    .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
-                contents.add(content(role = "system") { text(formattedSystemVariablePrompt) })
-                
-                // Add first AI message
-                firstAIMessage?.let { first ->
-                    contents.add(content(role = "model") { text(first) })
-                }
-                
-                // Add user's last message if present
-                conversationHistory.lastOrNull()?.let { lastMsg ->
-                    if (lastMsg.isUser) {
-                        contents.add(content(role = "user") { text(lastMsg.text.toString()) })
-                    }
-                }
-                
-                // Generate response based on the full prompt structure
-                val response = currentModel.generateContent(*contents.toTypedArray())
-                aiResponseText = response.text
-                Log.d(TAG, "Raw Gemini Response (subsequent): $aiResponseText")
-
-                if (aiResponseText == null) {
-                    Log.w(TAG, "Gemini subsequent response was null.")
-                    errorMessage = "(Error getting subsequent response)"
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API for subsequent message", e)
-                errorMessage = "(API Error: ${e.message})"
+            aiManager.generateSubsequentResponse(
+                appName = appName,
+                sessionTimeMs = sessionTimeMs,
+                dailyTimeMs = dailyTimeMs,
+                conversationHistory = conversationHistory
+            ) { response ->
+                val message = ChatMessage(response, System.currentTimeMillis(), aiPerson, false)
+                conversationHistory.add(message)
+                showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
             }
-
-            // Add AI response/error to history
-            val aiMessageToAdd = if (aiResponseText != null) {
-                Log.i(TAG, "Processed AI Response (subsequent): $aiResponseText")
-                ChatMessage(aiResponseText, System.currentTimeMillis(), aiPerson, false)
-            } else {
-                ChatMessage(errorMessage ?: "(Unknown Error)", System.currentTimeMillis(), aiPerson, false)
-            }
-            conversationHistory.add(aiMessageToAdd)
-            
-            // Update notification to show the new exchange
-            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         }
     }
 

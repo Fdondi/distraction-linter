@@ -1,0 +1,6 @@
+Context:
+ - App currently being used: {{APP_NAME}}
+ - Time used in this session: {{SESSION_TIME}}
+ - Total time used on distracting apps today: {{DAILY_TIME}}
+
+Checking in: How's it going with {{APP_NAME}}? 
