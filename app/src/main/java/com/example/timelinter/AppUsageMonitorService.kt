@@ -3,7 +3,6 @@ package com.example.timelinter
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -12,28 +11,17 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 // Gemini SDK Imports
-import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.Content
-import com.google.ai.client.generativeai.type.asTextOrNull
-import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.*
 
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import java.text.SimpleDateFormat
 import java.util.*
 import android.app.usage.UsageStats
 import android.app.PendingIntent
 import androidx.core.app.Person
-import java.io.BufferedReader
-import java.io.InputStreamReader
-
-// Simple data class for messages
-data class ChatMessage(val text: CharSequence, val timestamp: Long, val sender: Person, val isUser: Boolean)
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -83,9 +71,6 @@ class AppUsageMonitorService : Service() {
     // Persons for MessagingStyle
     private lateinit var userPerson: Person
     private lateinit var aiPerson: Person
-
-    // Conversation history
-    private val conversationHistory = mutableListOf<ChatMessage>()
 
     // State tracking
     @Volatile private var wasPreviouslyWasteful = false
@@ -237,7 +222,7 @@ class AppUsageMonitorService : Service() {
         // *** Clear history on transition from wasteful to non-wasteful ***
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
             Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
-            conversationHistory.clear()
+            conversationHistoryManager.clearHistories()
         }
 
         // --- App change detection and time accumulation logic ---
@@ -264,6 +249,8 @@ class AppUsageMonitorService : Service() {
                   sessionWastedTime.set(0)
                   sessionStartTime.set(System.currentTimeMillis())
                   Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
+                  // Start a new conversation session
+                  conversationHistoryManager.startNewSession(detectedApp)
              } else {
                   // No need to reset sessionWastedTime if the new app isn't wasteful,
                   // as it wasn't accumulating for the previous non-wasteful one anyway.
@@ -324,8 +311,7 @@ class AppUsageMonitorService : Service() {
                 val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
                 val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
 
-                val userMessage = ChatMessage(replyText, System.currentTimeMillis(), userPerson, true)
-                conversationHistory.add(userMessage)
+                conversationHistoryManager.addUserMessage(replyText, appName, sessionMs, dailyMs)
                 
                 // Send to AI for processing the reply based on history
                 sendToAI(appName, sessionMs, dailyMs) // Pass context for notification update
@@ -336,22 +322,18 @@ class AppUsageMonitorService : Service() {
 
     // Helper to map conversation history for the API
     private fun mapHistoryToApiContent(): List<Content> {
-        return conversationHistory.map { msg ->
-            content(role = if (msg.isUser) "user" else "model") {
-                text(msg.text.toString())
-            }
-        }
+        return conversationHistoryManager.getHistoryForAPI()
     }
 
     // Function for AI interaction AFTER a user reply
     private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         val currentModel = aiManager.getInitializedModel() ?: run {
             Log.e(TAG, "Cannot send reply to AI: GenerativeModel not initialized.")
-            conversationHistory.add(ChatMessage("(Error: AI not ready for reply)", System.currentTimeMillis(), aiPerson, false))
+            conversationHistoryManager.addAIMessage("(Error: AI not ready for reply)")
             showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
             return
         }
-        if (conversationHistory.isEmpty() || !conversationHistory.last().isUser) {
+        if (conversationHistoryManager.getUserVisibleHistory().isEmpty() || !conversationHistoryManager.getUserVisibleHistory().last().isUser) {
              Log.w(TAG, "sendToAI called but last message is not from user. Aborting.")
              return // Should not happen if called from handleReply
         }
@@ -405,14 +387,8 @@ class AppUsageMonitorService : Service() {
             }
 
             // Add AI response/error to history
-            val messageToAdd = if (aiResponseText != null) {
-                 Log.i(TAG, "Processed AI Response (reply): $aiResponseText")
-                 ChatMessage(aiResponseText, System.currentTimeMillis(), aiPerson, false)
-            } else {
-                 ChatMessage(errorMessage ?: "(Unknown Error)", System.currentTimeMillis(), aiPerson, false)
-            }
-            // Add AI's response
-            conversationHistory.add(messageToAdd)
+            val messageToAdd = aiResponseText ?: errorMessage ?: "(Unknown Error)"
+            conversationHistoryManager.addAIMessage(messageToAdd)
             
             // Set pause if needed
             if (pauseMinutes != null && pauseMinutes > 0) {
@@ -428,24 +404,25 @@ class AppUsageMonitorService : Service() {
 
     // Renamed and modified to handle initial prompt generation if needed
     private fun sendNotification(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        Log.d(TAG, "sendNotification called for $appName. History empty? ${conversationHistory.isEmpty()}")
-        if (conversationHistory.isEmpty()) {
-            // History is empty, show initial message without AI
-            val initialMessage = aiManager.getInitialMessage(appName)
-            val message = ChatMessage(initialMessage, System.currentTimeMillis(), aiPerson, false)
-            conversationHistory.add(message)
+        Log.d(TAG, "sendNotification called for $appName. History empty? ${conversationHistoryManager.getUserVisibleHistory().isEmpty()}")
+        if (conversationHistoryManager.getUserVisibleHistory().isEmpty()) {
+            // History is empty. This means a new session needs to be fully initialized.
+            // This can happen if the app was already wasteful when monitoring started,
+            // and this is the first sendNotification for it.
+            Log.i(TAG, "History is empty in sendNotification. Starting a new session for $appName.")
+            conversationHistoryManager.startNewSession(appName) // This populates history with the initial AI message.
+            // Now, user-visible history is NOT empty. We directly show this initial message.
             showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         } else {
-            // History exists, generate subsequent AI response
-            Log.d(TAG, "History exists, generating subsequent AI response.")
+            // History exists. This means an initial message (or more) is already there.
+            // We need the AI to generate a *new* message based on the current context and existing history.
+            Log.d(TAG, "History exists, generating subsequent AI response for $appName.")
             aiManager.generateSubsequentResponse(
                 appName = appName,
                 sessionTimeMs = sessionTimeMs,
                 dailyTimeMs = dailyTimeMs,
-                conversationHistory = conversationHistory,
-                onResponse = { response: String ->
-                    val message = ChatMessage(response, System.currentTimeMillis(), aiPerson, false)
-                    conversationHistory.add(message)
+                onResponse = { response: String -> // response is the AI's new nag/message
+                    conversationHistoryManager.addAIMessage(response) // Add new AI nag to history
                     showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
                 }
             )
@@ -454,22 +431,15 @@ class AppUsageMonitorService : Service() {
 
     // Modified to remove the initial message fallback
     private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
-        // *** REMOVED: No longer adding default message here ***
-        // if (conversationHistory.isEmpty()) { ... }
-        
-        Log.d(TAG, "showConversationNotification called. History size: ${conversationHistory.size}")
-        if (conversationHistory.isEmpty()) {
+        Log.d(TAG, "showConversationNotification called. History size: ${conversationHistoryManager.getUserVisibleHistory().size}")
+        if (conversationHistoryManager.getUserVisibleHistory().isEmpty()) {
              Log.w(TAG, "showConversationNotification called with empty history. Notification might appear empty or not show.")
-             // Optionally, could cancel the notification if history becomes empty? 
-             // notificationManager.cancel(NOTIFICATION_ID)
-             // return // Or let it proceed to show an empty notification
         }
 
         // --- Remote Input Action with Context (Unchanged) --- 
         val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run { setLabel("Reply...").build() }
         val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
             action = ACTION_HANDLE_REPLY
-            // *** Add context as extras ***
             putExtra(EXTRA_APP_NAME, appName)
             putExtra(EXTRA_SESSION_TIME_MS, sessionTimeMs)
             putExtra(EXTRA_DAILY_TIME_MS, dailyTimeMs)
@@ -482,24 +452,23 @@ class AppUsageMonitorService : Service() {
 
         // --- Build MessagingStyle (Unchanged) --- 
         val messagingStyle = NotificationCompat.MessagingStyle(userPerson)
-        conversationHistory.forEach { msg ->
+        conversationHistoryManager.getUserVisibleHistory().forEach { msg ->
             val notificationMessage = NotificationCompat.MessagingStyle.Message(
                 msg.text, msg.timestamp, msg.sender
             )
             messagingStyle.addMessage(notificationMessage)
         }
-        // ----------------------------
         
         // --- Build Notification (Unchanged) --- 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setStyle(messagingStyle)
-            .setPriority(NotificationCompat.PRIORITY_HIGH) // Confirm HIGH priority
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(false) 
             .setOngoing(false) 
             .addAction(action)
             
-         val contentText = conversationHistory.lastOrNull()?.text ?: "Conversation started..." // Better fallback
+         val contentText = conversationHistoryManager.getUserVisibleHistory().lastOrNull()?.text ?: "Conversation started..."
          notificationBuilder.setContentText(contentText)
 
          try {

@@ -442,27 +442,6 @@
     </issue>
 
     <issue
-        id="UnusedResources"
-        message="The resource `R.raw.gemini_first_ai_message` appears to be unused">
-        <location
-            file="src/main/res/raw/gemini_first_ai_message.txt"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.raw.gemini_system_prompt` appears to be unused">
-        <location
-            file="src/main/res/raw/gemini_system_prompt.txt"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.raw.gemini_user_template` appears to be unused">
-        <location
-            file="src/main/res/raw/gemini_user_template.txt"/>
-    </issue>
-
-    <issue
         id="UseKtx"
         message="Use the KTX extension function `SharedPreferences.edit` instead?"
         errorLine1="        getEncryptedPreferences(context)?.edit()?.putString(API_KEY_PREF, apiKey)?.apply()"
