@@ -57,6 +57,10 @@ android {
         compose = true
         buildConfig = true // Keep true if other buildConfig fields exist or might be added
     }
+
+    lint {
+        baseline = file("lint-baseline.xml")
+    }
 }
 
 dependencies {

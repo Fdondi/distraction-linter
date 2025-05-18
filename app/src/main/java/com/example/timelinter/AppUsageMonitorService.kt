@@ -40,6 +40,7 @@ class AppUsageMonitorService : Service() {
     private val executor = Executors.newSingleThreadScheduledExecutor()
     private lateinit var notificationManager: NotificationManager
     private lateinit var aiManager: AIInteractionManager
+    private lateinit var conversationHistoryManager: ConversationHistoryManager
 
     companion object {
         // Notification Channel IDs
@@ -74,7 +75,7 @@ class AppUsageMonitorService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Gemini Model
-    private var generativeModel: GenerativeModel? = null
+    // private var generativeModel: GenerativeModel? = null
 
     // Monitoring state
     @Volatile private var isMonitoringScheduled = false
@@ -90,17 +91,21 @@ class AppUsageMonitorService : Service() {
     @Volatile private var wasPreviouslyWasteful = false
     private val naggingPausedUntil = AtomicLong(0)
 
-    // --- Prompt Loading --- 
-    private var systemPromptFixed: String? = null
-    private var systemPromptVariableTemplate: String? = null
-    private var firstAIMessage: String? = null
-
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
-        aiManager = AIInteractionManager(this)
+        
+        // Initialize ConversationHistoryManager first
+        conversationHistoryManager = ConversationHistoryManager(
+            systemPrompt = readRawResource(R.raw.gemini_system_prompt),
+            initialAIMessageTemplate = readRawResource(R.raw.gemini_first_ai_message),
+            userInteractionTemplate = readRawResource(R.raw.gemini_user_template)
+        )
+        
+        // Then initialize AIInteractionManager with the conversationHistoryManager
+        aiManager = AIInteractionManager(this, conversationHistoryManager)
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
@@ -117,10 +122,9 @@ class AppUsageMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
-        // Ensure model is initialized if API key was added later
-        if (generativeModel == null) { 
-             aiManager.loadPrompts() // Reload prompts in case they failed initially
-             generativeModel = aiManager.initializeGeminiModel() 
+        // Optionally, check model availability for logging or early warning
+        if (aiManager.getInitializedModel() == null) {
+            Log.w(TAG, "GenerativeModel could not be initialized or is not yet available in onStartCommand.")
         }
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
@@ -341,7 +345,7 @@ class AppUsageMonitorService : Service() {
 
     // Function for AI interaction AFTER a user reply
     private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        val currentModel = generativeModel ?: run {
+        val currentModel = aiManager.getInitializedModel() ?: run {
             Log.e(TAG, "Cannot send reply to AI: GenerativeModel not initialized.")
             conversationHistory.add(ChatMessage("(Error: AI not ready for reply)", System.currentTimeMillis(), aiPerson, false))
             showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
@@ -438,12 +442,13 @@ class AppUsageMonitorService : Service() {
                 appName = appName,
                 sessionTimeMs = sessionTimeMs,
                 dailyTimeMs = dailyTimeMs,
-                conversationHistory = conversationHistory
-            ) { response ->
-                val message = ChatMessage(response, System.currentTimeMillis(), aiPerson, false)
-                conversationHistory.add(message)
-                showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-            }
+                conversationHistory = conversationHistory,
+                onResponse = { response: String ->
+                    val message = ChatMessage(response, System.currentTimeMillis(), aiPerson, false)
+                    conversationHistory.add(message)
+                    showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
+                }
+            )
         }
     }
 
@@ -616,6 +621,15 @@ class AppUsageMonitorService : Service() {
         } else {
              // On older versions, control sound/vibration directly on the Notification builder
              Log.d(TAG, "Skipping channel creation (SDK < O)")
+        }
+    }
+
+    private fun readRawResource(resourceId: Int): String {
+        return try {
+            resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading raw resource $resourceId", e)
+            ""
         }
     }
 
