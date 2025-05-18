@@ -16,6 +16,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 // Gemini SDK Imports
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.asTextOrNull
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.*
@@ -28,6 +29,8 @@ import java.util.*
 import android.app.usage.UsageStats
 import android.app.PendingIntent
 import androidx.core.app.Person
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 // Simple data class for messages
 data class ChatMessage(val text: CharSequence, val timestamp: Long, val sender: Person, val isUser: Boolean)
@@ -69,36 +72,39 @@ class AppUsageMonitorService : Service() {
     // Coroutine scope for background tasks like API calls
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Gemini Model (initialized lazily or when key is available)
+    // Gemini Model
     private var generativeModel: GenerativeModel? = null
 
-    // Use volatile for thread safety, though AtomicBoolean is often preferred
+    // Monitoring state
     @Volatile private var isMonitoringScheduled = false
 
-    // Define Persons for MessagingStyle
+    // Persons for MessagingStyle
     private lateinit var userPerson: Person
     private lateinit var aiPerson: Person
 
-    // Store the current conversation thread (simple approach)
+    // Conversation history
     private val conversationHistory = mutableListOf<ChatMessage>()
 
-    // Track previous state for clearing history
+    // State tracking
     @Volatile private var wasPreviouslyWasteful = false
-
-    // Timestamp until nagging is paused by AI command
     private val naggingPausedUntil = AtomicLong(0)
+
+    // --- Prompt Loading --- 
+    private var systemPrompt: String? = null
+    private var initialPromptTemplate: String? = null
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
-        initializeGeminiModel()
+        loadPrompts() // Load prompts early
+        initializeGeminiModel() // Initialize model (will use loaded system prompt if available)
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
         aiPerson = Person.Builder().setName("Time Coach").setKey("ai").setBot(true).build()
-        
+
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
             startForeground(STATS_NOTIFICATION_ID, createStatsNotification())
@@ -108,16 +114,45 @@ class AppUsageMonitorService : Service() {
         }
     }
 
+    private fun loadPrompts() {
+        systemPrompt = loadRawResource(R.raw.gemini_system_prompt)
+        initialPromptTemplate = loadRawResource(R.raw.gemini_initial_prompt_template)
+        if (systemPrompt == null) {
+            Log.e(TAG, "Failed to load system prompt!")
+        }
+        if (initialPromptTemplate == null) {
+            Log.e(TAG, "Failed to load initial prompt template!")
+        }
+    }
+
+    private fun loadRawResource(resId: Int): String? {
+        return try {
+            resources.openRawResource(resId).use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readText()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading raw resource: $resId", e)
+            null
+        }
+    }
+
     private fun initializeGeminiModel() {
         val apiKey = ApiKeyManager.getKey(this)
+        if (systemPrompt == null) {
+             Log.w(TAG, "System prompt not loaded yet, cannot initialize model.")
+             return // Or retry loading?
+        }
         if (!apiKey.isNullOrEmpty()) {
             try {
                 generativeModel = GenerativeModel(
                     modelName = "gemini-2.0-flash-lite",
-                    apiKey = apiKey
-                    // Add safetySettings and generationConfig if needed
+                    apiKey = apiKey,
+                    // Pass the loaded system instruction here
+                    systemInstruction = content(role="system") { text(systemPrompt!!) }
                 )
-                Log.i(TAG, "GenerativeModel initialized successfully.")
+                Log.i(TAG, "GenerativeModel initialized successfully with system prompt.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing GenerativeModel", e)
                 generativeModel = null
@@ -130,17 +165,21 @@ class AppUsageMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
+        // Ensure model is initialized if API key was added later
+        if (generativeModel == null) { 
+             loadPrompts() // Reload prompts in case they failed initially
+             initializeGeminiModel() 
+        }
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
                 handleReply(intent)
-                lastNaggingNotificationTime.set(0)
+                lastNaggingNotificationTime.set(0) // Allow immediate response display
             }
             else -> {
                 Log.d(TAG, "onStartCommand: Default action - ensuring monitoring is started.")
                 startMonitoring()
             }
         }
-        if (generativeModel == null) { initializeGeminiModel() }
         return START_STICKY
     }
 
@@ -234,18 +273,15 @@ class AppUsageMonitorService : Service() {
         val now = System.currentTimeMillis()
         if (now < naggingPausedUntil.get()) {
             Log.v(TAG, "Nagging is paused until ${Date(naggingPausedUntil.get())}. Skipping nag check.")
-            // Still need to update previous state and log finish
             wasPreviouslyWasteful = isCurrentlyWasteful
             Log.d(TAG, "checkAppUsage finished (Nagging Paused). Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
-            return // Skip the rest of the nagging logic
+            return
         }
 
         // *** Clear history on transition from wasteful to non-wasteful ***
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
             Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
             conversationHistory.clear()
-            // Optionally cancel the conversation notification if it's showing
-            // notificationManager.cancel(NOTIFICATION_ID)
         }
 
         // --- App change detection and time accumulation logic ---
@@ -298,23 +334,22 @@ class AppUsageMonitorService : Service() {
             val timeSinceLastNag = now - lastNaggingNotificationTime.get()
 
             if (timeSinceLastNag >= naggingIntervalSeconds * 1000) {
-                Log.d(TAG, "Nagging interval passed for wasteful app '$detectedApp'. Showing/Updating conversation notification.")
-                // *** Get current context to pass ***
+                Log.d(TAG, "Nagging interval passed for wasteful app '$detectedApp'.")
                 val currentAppName = getReadableAppName(detectedApp)
                 val currentSessionMs = sessionWastedTime.get()
                 val currentDailyMs = dailyWastedTime.get()
 
+                // *** Call sendNotification, which now handles initial message generation ***
                 sendNotification(currentAppName, currentSessionMs, currentDailyMs)
                 lastNaggingNotificationTime.set(now)
-            } else { /* Log still within interval */ }
+            } else {
+                Log.v(TAG, "Still within nagging interval for '$detectedApp'. Time since last: ${timeSinceLastNag}ms")
+            }
         } else {
-             // Reset nag timer immediately if not wasteful
              lastNaggingNotificationTime.set(0)
-             // Log.v(TAG, "Non-wasteful app active, resetting nagging timer.")
         }
         
         wasPreviouslyWasteful = isCurrentlyWasteful
-
         Log.d(TAG, "checkAppUsage finished. Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
     }
 
@@ -334,86 +369,60 @@ class AppUsageMonitorService : Service() {
             val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
             if (!replyText.isNullOrEmpty()) {
                 Log.i(TAG, "User replied: '$replyText'")
-
-                // *** Extract context from Intent extras ***
+                // Context for potential immediate use (though history is main source)
                 val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
                 val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
                 val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
-                
-                Log.d(TAG, "Context extracted from reply intent: App=$appName, Sess=$sessionMs, Daily=$dailyMs")
 
-                // Add user message to history
                 val userMessage = ChatMessage(replyText, System.currentTimeMillis(), userPerson, true)
                 conversationHistory.add(userMessage)
                 
-                // Send to AI using the extracted context
-                sendToAI(appName, sessionMs, dailyMs, replyText)
+                // Send to AI for processing the reply based on history
+                sendToAI(appName, sessionMs, dailyMs) // Pass context for notification update
 
             } else { Log.w(TAG, "Received empty reply.") }
         } else { Log.w(TAG, "Could not extract remote input from reply intent.") }
     }
 
-    // Function for AI interaction
-    private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long, userReply: String) {
-        if (generativeModel == null) {
-            Log.e(TAG, "Cannot send to AI: GenerativeModel not initialized.")
-            conversationHistory.add(ChatMessage("(Error: AI not ready)", System.currentTimeMillis(), aiPerson, false))
-            showConversationNotification() // Show error
+    // Helper to map conversation history for the API
+    private fun mapHistoryToApiContent(): List<Content> {
+        return conversationHistory.map { msg ->
+            content(role = if (msg.isUser) "user" else "model") {
+                text(msg.text.toString())
+            }
+        }
+    }
+
+    // Function for AI interaction AFTER a user reply
+    private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        val currentModel = generativeModel ?: run {
+            Log.e(TAG, "Cannot send reply to AI: GenerativeModel not initialized.")
+            conversationHistory.add(ChatMessage("(Error: AI not ready for reply)", System.currentTimeMillis(), aiPerson, false))
+            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
             return
         }
-        
-        // --- Construct prompt with WAIT tool instruction --- 
-        val prompt = """
-        Context:
-         - App currently being used: $appName
-         - Time used in this session: ${formatDuration(sessionTimeMs)}
-         - Total time used on distracting apps today: ${formatDuration(dailyTimeMs)}
-         
-         User's response when asked about their current app usage: "$userReply"
-         
-         Your Role: Act like a friendly, supportive friend who is gently checking in on the user's time management. Acknowledge their reply empathetically. Your goal is to help them be mindful, not to strictly enforce rules. Be concise (1-2 sentences).
-         
-         Tools use: A tool command MUST be on its own new line. Example: `# WAIT 30`. It can be the only response or follow a message.
-         Tools Available:
-         - WAIT: If the user's reply convincingly suggests they genuinely deserve or need a break, for example:
-          * they just finished hard work and deserve a break
-          * they are very stressed and need a pause
-          * they genuinely are in a situation where there is nothing better they can do
-        then USE this tool. Output `# WAIT [minutes]` on a new line, choosing a reasonable duration (e.g., 15-60 minutes) based on their reason. You can optionally add a brief confirmation message before the tool line.
-         
-         Example Interaction (User deserves break):
-         User: I just closed a million dollar contract!
-         AI Response:
-         Wow, congratulations! Definitely take a break.
-         # WAIT 60
+        if (conversationHistory.isEmpty() || !conversationHistory.last().isUser) {
+             Log.w(TAG, "sendToAI called but last message is not from user. Aborting.")
+             return // Should not happen if called from handleReply
+        }
 
-         Example Interaction (Nothing better):
-         User: Yeah, I'm on the toilet.
-         AI Response: Seems a great time for Duolingo! 
-         User: I just won my league.
-         AI Response: Impressive! Mhh... any unaswered messages?
-         User: All caught up. Really, no one needs me more than cat videos right now.
-         AI response: Alright, enjoy the downtime!
-         # WAIT 10
+        val mappedHistory = mapHistoryToApiContent()
+        Log.d(TAG, "Sending reply to AI. History size: ${mappedHistory.size}")
 
-         If the WAIT tool isn't used, just provide your friendly check-in response based on the context and user reply.
-         
-         AI Response:
-         """.trimIndent()
-
-        Log.d(TAG, "Sending prompt to Gemini: $prompt")
         serviceScope.launch {
             var aiResponseText: String? = null
             var errorMessage: String? = null
             var pauseMinutes: Int? = null
 
             try {
-                val model = generativeModel ?: throw IllegalStateException("Model became null unexpectedly")
-                val response = model.generateContent(prompt)
-                val rawResponse = response.text
-                Log.d(TAG, "Raw Gemini Response: $rawResponse")
+                 // The system prompt is part of the model config now
+                 // Generate response based on the full history
+                 val response = currentModel.generateContent(*mappedHistory.toTypedArray())
+                 val rawResponse = response.text
+                 Log.d(TAG, "Raw Gemini Response (reply): $rawResponse")
 
-                if (rawResponse != null) {
+                 // --- Parse response for # WAIT (same logic as before) ---
+                 if (rawResponse != null) {
                     // Check for # WAIT command
                     val lines = rawResponse.lines()
                     val waitCommand = lines.find { it.startsWith("# WAIT") }
@@ -422,67 +431,136 @@ class AppUsageMonitorService : Service() {
                              pauseMinutes = waitCommand.removePrefix("# WAIT").trim().toIntOrNull()
                              if (pauseMinutes != null && pauseMinutes > 0) {
                                  Log.i(TAG, "AI requested WAIT for $pauseMinutes minutes.")
-                                 aiResponseText = "Okay, pausing nags for $pauseMinutes minute${if (pauseMinutes > 1) "s" else ""}." // User-friendly message
+                                 aiResponseText = lines.firstOrNull { !it.startsWith("# WAIT") } ?: "Okay, pausing nags for $pauseMinutes minute${if (pauseMinutes > 1) "s" else ""}."
                              } else {
                                  Log.w(TAG, "Invalid minutes in WAIT command: $waitCommand")
-                                 aiResponseText = rawResponse // Fallback to showing raw response if WAIT format is bad
-                                 pauseMinutes = null // Ensure pause isn't activated
+                                 aiResponseText = rawResponse
+                                 pauseMinutes = null
                              }
                          } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing WAIT command", e)
-                             aiResponseText = rawResponse // Fallback
+                             Log.e(TAG, "Error parsing WAIT command", e)
+                             aiResponseText = rawResponse
                              pauseMinutes = null
                          }
                     } else {
-                        aiResponseText = rawResponse // Normal response
+                        aiResponseText = rawResponse
                     }
-                } else {
-                    Log.w(TAG, "Gemini response was null.")
+                 } else {
+                    Log.w(TAG, "Gemini response (reply) was null.")
                     errorMessage = "(Error getting response)"
-                }
+                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API", e)
+                Log.e(TAG, "Error calling Gemini API for reply", e)
                 errorMessage = "(API Error: ${e.message})"
             }
 
-            // Add AI response or error message to history
+            // Add AI response/error to history
             val messageToAdd = if (aiResponseText != null) {
-                 Log.i(TAG, "Processed AI Response/Action: $aiResponseText")
+                 Log.i(TAG, "Processed AI Response (reply): $aiResponseText")
                  ChatMessage(aiResponseText, System.currentTimeMillis(), aiPerson, false)
             } else {
                  ChatMessage(errorMessage ?: "(Unknown Error)", System.currentTimeMillis(), aiPerson, false)
             }
+            // Add AI's response
             conversationHistory.add(messageToAdd)
             
-            // Set the pause if minutes were parsed
+            // Set pause if needed
             if (pauseMinutes != null && pauseMinutes > 0) {
                  val pauseMillis = TimeUnit.MINUTES.toMillis(pauseMinutes.toLong())
                  naggingPausedUntil.set(System.currentTimeMillis() + pauseMillis)
                  Log.i(TAG, "Nagging paused until: ${Date(naggingPausedUntil.get())}")
-                 // Optionally cancel the stats notification during pause?
             }
             
-            // Update notification ONCE here
+            // Update notification with the new AI response
             showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
         }
     }
 
-    // Modified to accept context
+    // Renamed and modified to handle initial prompt generation if needed
     private fun sendNotification(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        Log.d(TAG, "sendNotification called: Triggering update/display with context: App=$appName")
-        // Pass context to showConversationNotification
-        showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
+        Log.d(TAG, "sendNotification called for $appName. History empty? ${conversationHistory.isEmpty()}")
+        if (conversationHistory.isEmpty()) {
+            // History is empty, generate initial AI message based on context
+            val template = initialPromptTemplate
+            val model = generativeModel
+            if (template != null && model != null) {
+                val formattedPrompt = template
+                    .replace("{{APP_NAME}}", appName)
+                    .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
+                    .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
+                
+                Log.d(TAG, "Generating initial AI message with prompt:\n$formattedPrompt")
+                generateInitialAIResponse(formattedPrompt, appName, sessionTimeMs, dailyTimeMs)
+            } else {
+                Log.e(TAG, "Cannot generate initial message: Template or Model is null.")
+                // Fallback: Just show the notification empty or with a static message?
+                // For now, just call show to display whatever might be there (nothing)
+                 showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
+            }
+        } else {
+            // History exists, just update the notification display (no new AI call needed here)
+            Log.d(TAG, "History exists, just updating notification display.")
+            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
+        }
     }
 
-    // Modified to accept context and add it to replyIntent extras
-    private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
-        if (conversationHistory.isEmpty()) {
-             val initialMessage = ChatMessage("How is it going?", System.currentTimeMillis(), aiPerson, false)
-             conversationHistory.add(initialMessage)
-        }
-        Log.d(TAG, "showConversationNotification called. History size: ${conversationHistory.size}")
+    // New function to generate the VERY FIRST AI response in a conversation
+    private fun generateInitialAIResponse(formattedPrompt: String, appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        val currentModel = generativeModel ?: return // Already checked in caller, but safe
 
-        // --- Remote Input Action with Context --- 
+        serviceScope.launch {
+            var aiResponseText: String? = null
+            var errorMessage: String? = null
+            
+             // Create the first "user" message (containing context) to store in history
+            val contextMessage = ChatMessage(formattedPrompt, System.currentTimeMillis(), userPerson, true)
+            
+            try {
+                // Generate response based on the formatted initial prompt ONLY
+                 val initialContent = content(role = "user") { text(formattedPrompt) } // Need to create Content
+                 val response = currentModel.generateContent(initialContent)
+                 aiResponseText = response.text // No need to check for WAIT on initial msg
+                 Log.d(TAG, "Raw Gemini Response (initial): $aiResponseText")
+
+                if (aiResponseText == null) {
+                     Log.w(TAG, "Gemini initial response was null.")
+                     errorMessage = "(Error getting initial response)"
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error calling Gemini API for initial message", e)
+                errorMessage = "(API Error: ${e.message})"
+            }
+
+            // Add context message AND AI response/error to history
+             conversationHistory.add(contextMessage) // Add the context prompt first
+            val aiMessageToAdd = if (aiResponseText != null) {
+                 Log.i(TAG, "Processed AI Response (initial): $aiResponseText")
+                 ChatMessage(aiResponseText, System.currentTimeMillis(), aiPerson, false)
+            } else {
+                 ChatMessage(errorMessage ?: "(Unknown Error)", System.currentTimeMillis(), aiPerson, false)
+            }
+            conversationHistory.add(aiMessageToAdd) // Add AI response second
+            
+            // Update notification to show the initial exchange
+            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
+        }
+    }
+
+    // Modified to remove the initial message fallback
+    private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
+        // *** REMOVED: No longer adding default message here ***
+        // if (conversationHistory.isEmpty()) { ... }
+        
+        Log.d(TAG, "showConversationNotification called. History size: ${conversationHistory.size}")
+        if (conversationHistory.isEmpty()) {
+             Log.w(TAG, "showConversationNotification called with empty history. Notification might appear empty or not show.")
+             // Optionally, could cancel the notification if history becomes empty? 
+             // notificationManager.cancel(NOTIFICATION_ID)
+             // return // Or let it proceed to show an empty notification
+        }
+
+        // --- Remote Input Action with Context (Unchanged) --- 
         val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run { setLabel("Reply...").build() }
         val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
             action = ACTION_HANDLE_REPLY
@@ -497,10 +575,8 @@ class AppUsageMonitorService : Service() {
             .setAllowGeneratedReplies(true)
             .build()
 
-        // --- Build MessagingStyle --- 
+        // --- Build MessagingStyle (Unchanged) --- 
         val messagingStyle = NotificationCompat.MessagingStyle(userPerson)
-            .setConversationTitle("Time Coach ($appName)") // Use passed appName
-            .setGroupConversation(false)
         conversationHistory.forEach { msg ->
             val notificationMessage = NotificationCompat.MessagingStyle.Message(
                 msg.text, msg.timestamp, msg.sender
@@ -509,7 +585,7 @@ class AppUsageMonitorService : Service() {
         }
         // ----------------------------
         
-        // --- Build Notification (Confirm HIGH priority) --- 
+        // --- Build Notification (Unchanged) --- 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setStyle(messagingStyle)
@@ -518,7 +594,7 @@ class AppUsageMonitorService : Service() {
             .setOngoing(false) 
             .addAction(action)
             
-         val contentText = conversationHistory.lastOrNull()?.text ?: "Time check..."
+         val contentText = conversationHistory.lastOrNull()?.text ?: "Conversation started..." // Better fallback
          notificationBuilder.setContentText(contentText)
 
          try {
