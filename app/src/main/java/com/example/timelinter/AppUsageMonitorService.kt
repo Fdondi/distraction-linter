@@ -11,7 +11,6 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
-// Gemini SDK Imports
 import com.google.ai.client.generativeai.type.Content
 import kotlinx.coroutines.*
 
@@ -29,6 +28,7 @@ class AppUsageMonitorService : Service() {
     private lateinit var notificationManager: NotificationManager
     private lateinit var aiManager: AIInteractionManager
     private lateinit var conversationHistoryManager: ConversationHistoryManager
+    private lateinit var interactionStateManager: InteractionStateManager
 
     companion object {
         // Notification Channel IDs
@@ -48,10 +48,8 @@ class AppUsageMonitorService : Service() {
 
     // Timings
     private val statsUpdateIntervalSeconds = 30L // How often to update the stats notification
-    private val naggingIntervalSeconds = 30L // Minimum interval between nagging notifications
     private val checkIntervalSeconds = 10L // How often to check app usage for time tracking
 
-    private val lastNaggingNotificationTime = AtomicLong(0) // Track time for nagging notification specifically
     private val sessionStartTime = AtomicLong(System.currentTimeMillis())
     private val dailyStartTime = AtomicLong(getStartOfDay())
     private val sessionWastedTime = AtomicLong(0)
@@ -62,9 +60,6 @@ class AppUsageMonitorService : Service() {
     // Coroutine scope for background tasks like API calls
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Gemini Model
-    // private var generativeModel: GenerativeModel? = null
-
     // Monitoring state
     @Volatile private var isMonitoringScheduled = false
 
@@ -74,7 +69,6 @@ class AppUsageMonitorService : Service() {
 
     // State tracking
     @Volatile private var wasPreviouslyWasteful = false
-    private val naggingPausedUntil = AtomicLong(0)
 
     override fun onCreate() {
         super.onCreate()
@@ -82,10 +76,15 @@ class AppUsageMonitorService : Service() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
         
-        // Initialize ConversationHistoryManager first
+        // Initialize InteractionStateManager
+        interactionStateManager = InteractionStateManager(this)
+        
+        // Initialize ConversationHistoryManager
         conversationHistoryManager = ConversationHistoryManager(
+            context = this,
             systemPrompt = readRawResource(R.raw.gemini_system_prompt),
-            initialAIMessageTemplate = readRawResource(R.raw.gemini_first_ai_message),
+            aiMemoryTemplate = readRawResource(R.raw.ai_memory_template),
+            userInfoTemplate = readRawResource(R.raw.user_info_template),
             userInteractionTemplate = readRawResource(R.raw.gemini_user_template)
         )
         
@@ -107,14 +106,10 @@ class AppUsageMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "onStartCommand received action: ${intent?.action}")
-        // Optionally, check model availability for logging or early warning
-        if (aiManager.getInitializedModel() == null) {
-            Log.w(TAG, "GenerativeModel could not be initialized or is not yet available in onStartCommand.")
-        }
+        
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
                 handleReply(intent)
-                lastNaggingNotificationTime.set(0) // Allow immediate response display
             }
             else -> {
                 Log.d(TAG, "onStartCommand: Default action - ensuring monitoring is started.")
@@ -125,30 +120,20 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun startMonitoring() {
-        // Prevent rescheduling if already running
         if (isMonitoringScheduled) {
              Log.d(TAG, "startMonitoring: Monitoring already scheduled. Skipping.")
              return
         }
         
-        // Check if executor is shut down (e.g., after onDestroy -> onCreate)
-        // Recreate if necessary
-        // NOTE: This check might need refinement depending on service lifecycle edge cases.
-        // if (executor.isShutdown || executor.isTerminated) {
-        //     Log.w(TAG, "Executor was shutdown. Recreating.")
-        //     executor = Executors.newSingleThreadScheduledExecutor()
-        // }
-
         Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
         try {
-            // Schedule the main check frequently
+            // Schedule the main interaction loop
             executor.scheduleAtFixedRate({
-                // Use try-catch within scheduled tasks to prevent stopping the schedule
                 try {
-                    Log.v(TAG, "Scheduled task running: checkAppUsage")
-                    checkAppUsage()
+                    Log.v(TAG, "Scheduled task running: mainInteractionLoop")
+                    mainInteractionLoop()
                 } catch (t: Throwable) {
-                    Log.e(TAG, "Error within checkAppUsage task", t)
+                    Log.e(TAG, "Error within mainInteractionLoop task", t)
                 }
             }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
 
@@ -162,76 +147,284 @@ class AppUsageMonitorService : Service() {
                  }
              }, 5, statsUpdateIntervalSeconds, TimeUnit.SECONDS)
              
-             isMonitoringScheduled = true // Set flag after successful scheduling
+             isMonitoringScheduled = true
              Log.i(TAG, "Monitoring tasks scheduled successfully.")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error scheduling monitoring tasks", e)
-             isMonitoringScheduled = false // Ensure flag is false if scheduling fails
+             isMonitoringScheduled = false
         }
     }
 
-    private fun checkAppUsage() {
-        Log.d(TAG, "checkAppUsage started")
+    /**
+     * Main interaction loop implementing the flow from interaction.md
+     */
+    private fun mainInteractionLoop() {
+        // Clean up expired allows
+        interactionStateManager.cleanupExpiredAllows()
+        
+        // Get current app usage
+        val currentAppInfo = getCurrentAppUsage()
+        updateTimeTracking(currentAppInfo)
+        
+        val currentState = interactionStateManager.getCurrentState()
+        Log.v(TAG, "Main loop: State=$currentState, App=${currentAppInfo?.packageName}, Wasteful=${currentAppInfo?.isWasteful}")
+        
+        when (currentState) {
+            InteractionState.OBSERVING -> {
+                handleObservingState(currentAppInfo)
+            }
+            InteractionState.CONVERSATION_ACTIVE -> {
+                handleConversationActiveState(currentAppInfo)
+            }
+            InteractionState.WAITING_FOR_RESPONSE -> {
+                handleWaitingForResponseState(currentAppInfo)
+            }
+        }
+    }
+
+    private fun handleObservingState(appInfo: AppInfo?) {
+        // Step 0-1 from interaction.md
+        
+        if (appInfo?.isWasteful != true) {
+            // Not on wasteful app, continue observing
+            return
+        }
+        
+        // Check if this app is allowed
+        if (interactionStateManager.isAllowed(appInfo.readableName)) {
+            Log.d(TAG, "App '${appInfo.readableName}' is currently allowed, skipping")
+            return
+        }
+        
+        // Check if we should observe (observe_timer)
+        if (!interactionStateManager.shouldObserve()) {
+            Log.v(TAG, "Still within observe timer, waiting...")
+            return
+        }
+        
+        // Threshold exceeded - start conversation
+        Log.i(TAG, "Threshold exceeded for ${appInfo.readableName}, starting conversation")
+        
+        // Step 1b: Create initial AI history and start conversation
+        conversationHistoryManager.startNewSession(
+            appName = appInfo.readableName,
+            sessionTimeMs = sessionWastedTime.get(),
+            dailyTimeMs = dailyWastedTime.get()
+        )
+        
+        interactionStateManager.startConversation()
+        
+        // Step 2: Send to AI and get initial response
+        generateAIResponse(appInfo)
+    }
+
+    private fun handleConversationActiveState(appInfo: AppInfo?) {
+        // Check if user moved away from wasteful apps
+        if (appInfo?.isWasteful != true) {
+            Log.i(TAG, "User moved away from wasteful apps, resetting to observing")
+            interactionStateManager.resetToObserving()
+            conversationHistoryManager.clearHistories()
+            return
+        }
+        
+        // Still on wasteful app, but conversation is active
+        // This state is handled by user responses or timeouts
+        Log.v(TAG, "Conversation active, waiting for user interaction")
+    }
+
+    private fun handleWaitingForResponseState(appInfo: AppInfo?) {
+        // Step 6a/6b from interaction.md
+        
+        // Check if user moved away from wasteful apps
+        if (appInfo?.isWasteful != true) {
+            Log.i(TAG, "User moved away from wasteful apps during response wait, resetting")
+            interactionStateManager.resetToObserving()
+            conversationHistoryManager.clearHistories()
+            return
+        }
+        
+        // Check for timeout
+        if (interactionStateManager.isResponseTimedOut()) {
+            Log.i(TAG, "Response timeout - adding '*no response*' and continuing")
+            
+            // Step 6a: Add "*no response*" to AI conversation (decorated), not UI
+            conversationHistoryManager.addNoResponseMessage(
+                currentAppName = appInfo?.readableName ?: "Unknown App",
+                sessionTimeMs = sessionWastedTime.get(),
+                dailyTimeMs = dailyWastedTime.get()
+            )
+            
+            // Continue conversation
+            interactionStateManager.continueConversation()
+            
+            // Step 7: Go to step 2 - send to AI again
+            generateAIResponse(appInfo)
+        }
+    }
+
+    private fun generateAIResponse(appInfo: AppInfo?) {
+        val currentModel = aiManager.getInitializedModel() ?: run {
+            Log.e(TAG, "Cannot generate AI response: Model not initialized")
+            return
+        }
+
+        serviceScope.launch {
+            try {
+                val apiContents = conversationHistoryManager.getHistoryForAPI()
+                Log.d(TAG, "Sending to AI. History size: ${apiContents.size}")
+
+                val response = currentModel.generateContent(*apiContents.toTypedArray())
+                val rawResponse = response.text
+                
+                if (rawResponse != null) {
+                    Log.d(TAG, "Raw AI Response: $rawResponse")
+                    
+                    // Step 3: Parse response and run tools
+                    val parsedResponse = ToolParser.parseAIResponse(rawResponse)
+                    
+                    // Process tools
+                    var shouldResetConversation = false
+                    for (tool in parsedResponse.tools) {
+                        when (tool) {
+                            is ToolCommand.Allow -> {
+                                Log.i(TAG, "Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
+                                interactionStateManager.applyAllowCommand(tool)
+                                shouldResetConversation = true
+                            }
+                            is ToolCommand.Remember -> {
+                                Log.i(TAG, "Processing REMEMBER tool: ${tool.content}")
+                                if (tool.durationMinutes != null) {
+                                    AIMemoryManager.addTemporaryMemory(this@AppUsageMonitorService, tool.content, tool.durationMinutes)
+                                } else {
+                                    AIMemoryManager.addPermanentMemory(this@AppUsageMonitorService, tool.content)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Step 4: If there was any non-tool answer, display to user
+                    if (parsedResponse.userMessage.isNotEmpty()) {
+                        conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
+                        showConversationNotification(
+                            appName = appInfo?.readableName ?: "Unknown App",
+                            sessionTimeMs = sessionWastedTime.get(),
+                            dailyTimeMs = dailyWastedTime.get()
+                        )
+                    }
+                    
+                    // Step 5a/5b: Check if conversation should reset or continue
+                    if (shouldResetConversation || parsedResponse.userMessage.isEmpty()) {
+                        // Step 5a: ALLOW tool used or no non-tool message -> reset
+                        Log.d(TAG, "Resetting conversation (ALLOW used or no message)")
+                        interactionStateManager.resetToObserving()
+                        conversationHistoryManager.clearHistories()
+                    } else {
+                        // Step 5b: Continue conversation, wait for response
+                        Log.d(TAG, "Continuing conversation, waiting for user response")
+                        interactionStateManager.startWaitingForResponse()
+                    }
+                    
+                } else {
+                    Log.w(TAG, "AI response was null")
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error generating AI response", e)
+            }
+        }
+    }
+
+    private fun handleReply(intent: Intent) {
+        val remoteInput = RemoteInput.getResultsFromIntent(intent)
+        if (remoteInput != null) {
+            val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
+            if (!replyText.isNullOrEmpty()) {
+                Log.i(TAG, "User replied: '$replyText'")
+                
+                val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
+                val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
+                val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
+
+                // Step 6b: User answered, save response and continue
+                conversationHistoryManager.addUserMessage(replyText, appName, sessionMs, dailyMs)
+                interactionStateManager.continueConversation()
+                
+                // Step 7: Go to step 2 - send to AI
+                val currentAppInfo = getCurrentAppUsage()
+                generateAIResponse(currentAppInfo)
+
+            } else { 
+                Log.w(TAG, "Received empty reply.") 
+            }
+        } else { 
+            Log.w(TAG, "Could not extract remote input from reply intent.") 
+        }
+    }
+
+    private data class AppInfo(
+        val packageName: String,
+        val readableName: String,
+        val isWasteful: Boolean
+    )
+
+    private fun getCurrentAppUsage(): AppInfo? {
         val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
         val beginTime = endTime - 1000 * checkIntervalSeconds
 
-        var foregroundApp: String? = null
         try {
             val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
             if (stats != null && stats.isNotEmpty()) {
                 var recentStat: UsageStats? = null
                 for (usageStats in stats) {
-                    // *** Filter out self ***
-                    if (usageStats.packageName == applicationContext.packageName) {
+                    // Filter out self and empty package names
+                    if (usageStats.packageName == applicationContext.packageName || usageStats.packageName.isEmpty()) {
                         continue 
-                    }
-                    if (usageStats.packageName == ""){
-                        continue
                     }
                     if (recentStat == null || usageStats.lastTimeUsed > recentStat.lastTimeUsed) {
                         recentStat = usageStats
                     }
                 }
-                foregroundApp = recentStat?.packageName
+                
+                if (recentStat != null) {
+                    val readableName = getReadableAppName(recentStat.packageName)
+                    val isWasteful = isWastefulApp(recentStat.packageName)
+                    
+                    return AppInfo(
+                        packageName = recentStat.packageName,
+                        readableName = readableName,
+                        isWasteful = isWasteful
+                    )
+                }
             }
-            Log.d(TAG, "Foreground app detected (excluding self): $foregroundApp (Current: $currentApp)")
-
         } catch (e: SecurityException) {
             Log.e(TAG, "Permission error querying usage stats", e)
-            return
         } catch (e: Exception) {
             Log.e(TAG, "Error querying usage stats", e)
-            return
         }
+        
+        return null
+    }
 
-        val detectedApp = foregroundApp ?: ""
-        val isCurrentlyWasteful = isWastefulApp(detectedApp)
-        Log.d(TAG, "App Check: Detected='$detectedApp', Current='$currentApp', IsWasteful=$isCurrentlyWasteful, WasWasteful=$wasPreviouslyWasteful")
-
-        // *** Check if nagging is paused ***
-        val now = System.currentTimeMillis()
-        if (now < naggingPausedUntil.get()) {
-            Log.v(TAG, "Nagging is paused until ${Date(naggingPausedUntil.get())}. Skipping nag check.")
-            wasPreviouslyWasteful = isCurrentlyWasteful
-            Log.d(TAG, "checkAppUsage finished (Nagging Paused). Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
-            return
-        }
-
-        // *** Clear history on transition from wasteful to non-wasteful ***
+    private fun updateTimeTracking(appInfo: AppInfo?) {
+        val detectedApp = appInfo?.packageName ?: ""
+        val isCurrentlyWasteful = appInfo?.isWasteful == true
+        
+        // Clear history on transition from wasteful to non-wasteful
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
             Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
             conversationHistoryManager.clearHistories()
+            interactionStateManager.resetToObserving()
         }
 
-        // --- App change detection and time accumulation logic ---
-        var timeSpent = 0L
+        // App change detection and time accumulation logic
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
+             
              // Add time spent on previous app IF IT WAS WASTEFUL
              if (currentApp != null && isWastefulApp(currentApp!!)) {
-                 timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
+                 val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
                  if (timeSpent < TimeUnit.MINUTES.toMillis(5)) { 
                      sessionWastedTime.addAndGet(timeSpent)
                      dailyWastedTime.addAndGet(timeSpent)
@@ -249,194 +442,34 @@ class AppUsageMonitorService : Service() {
                   sessionWastedTime.set(0)
                   sessionStartTime.set(System.currentTimeMillis())
                   Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
-                  // Start a new conversation session
-                  conversationHistoryManager.startNewSession(detectedApp)
-             } else {
-                  // No need to reset sessionWastedTime if the new app isn't wasteful,
-                  // as it wasn't accumulating for the previous non-wasteful one anyway.
-                  Log.d(TAG, "New non-wasteful app detected: $detectedApp.")
              }
-         } else if (currentApp != null && isWastefulApp(currentApp!!)) {
+         } else if (isCurrentlyWasteful) {
              // Accumulate time for current wasteful app
-             timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
+             val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
               if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
                  sessionWastedTime.addAndGet(timeSpent)
                  dailyWastedTime.addAndGet(timeSpent)
-                 Log.d(TAG, "Accumulated $timeSpent ms for current wasteful app: $currentApp")
-              } else {
-                  Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for current app: $currentApp")
+                 Log.v(TAG, "Accumulated $timeSpent ms for current wasteful app: $currentApp")
               }
              lastAppChangeTime.set(System.currentTimeMillis())
-         } else {
-              Log.d(TAG, "Current app '$currentApp' ('$detectedApp') is not wasteful or hasn't changed.")
          }
-         // --- End of time accumulation logic ---
-
-        // Send nagging notification check
-        if (isCurrentlyWasteful) {
-            val timeSinceLastNag = now - lastNaggingNotificationTime.get()
-
-            if (timeSinceLastNag >= naggingIntervalSeconds * 1000) {
-                Log.d(TAG, "Nagging interval passed for wasteful app '$detectedApp'.")
-                val currentAppName = getReadableAppName(detectedApp)
-                val currentSessionMs = sessionWastedTime.get()
-                val currentDailyMs = dailyWastedTime.get()
-
-                // *** Call sendNotification, which now handles initial message generation ***
-                sendNotification(currentAppName, currentSessionMs, currentDailyMs)
-                lastNaggingNotificationTime.set(now)
-            } else {
-                Log.v(TAG, "Still within nagging interval for '$detectedApp'. Time since last: ${timeSinceLastNag}ms")
-            }
-        } else {
-             lastNaggingNotificationTime.set(0)
-        }
-        
+         
         wasPreviouslyWasteful = isCurrentlyWasteful
-        Log.d(TAG, "checkAppUsage finished. Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
     }
 
     private fun isWastefulApp(packageName: String): Boolean {
         return TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
     }
 
-    private fun handleReply(intent: Intent) {
-        val remoteInput = RemoteInput.getResultsFromIntent(intent)
-        if (remoteInput != null) {
-            val replyText = remoteInput.getCharSequence(KEY_TEXT_REPLY)?.toString()
-            if (!replyText.isNullOrEmpty()) {
-                Log.i(TAG, "User replied: '$replyText'")
-                // Context for potential immediate use (though history is main source)
-                val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
-                val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
-                val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
-
-                conversationHistoryManager.addUserMessage(replyText, appName, sessionMs, dailyMs)
-                
-                // Send to AI for processing the reply based on history
-                sendToAI(appName, sessionMs, dailyMs) // Pass context for notification update
-
-            } else { Log.w(TAG, "Received empty reply.") }
-        } else { Log.w(TAG, "Could not extract remote input from reply intent.") }
-    }
-
-    // Helper to map conversation history for the API
-    private fun mapHistoryToApiContent(): List<Content> {
-        return conversationHistoryManager.getHistoryForAPI()
-    }
-
-    // Function for AI interaction AFTER a user reply
-    private fun sendToAI(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        val currentModel = aiManager.getInitializedModel() ?: run {
-            Log.e(TAG, "Cannot send reply to AI: GenerativeModel not initialized.")
-            conversationHistoryManager.addAIMessage("(Error: AI not ready for reply)")
-            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-            return
-        }
-        if (conversationHistoryManager.getUserVisibleHistory().isEmpty() || !conversationHistoryManager.getUserVisibleHistory().last().isUser) {
-             Log.w(TAG, "sendToAI called but last message is not from user. Aborting.")
-             return // Should not happen if called from handleReply
-        }
-
-        val mappedHistory = mapHistoryToApiContent()
-        Log.d(TAG, "Sending reply to AI. History size: ${mappedHistory.size}")
-
-        serviceScope.launch {
-            var aiResponseText: String? = null
-            var errorMessage: String? = null
-            var pauseMinutes: Int? = null
-
-            try {
-                 // The system prompt is part of the model config now
-                 // Generate response based on the full history
-                 val response = currentModel.generateContent(*mappedHistory.toTypedArray())
-                 val rawResponse = response.text
-                 Log.d(TAG, "Raw Gemini Response (reply): $rawResponse")
-
-                 // --- Parse response for # WAIT (same logic as before) ---
-                 if (rawResponse != null) {
-                    // Check for # WAIT command
-                    val lines = rawResponse.lines()
-                    val waitCommand = lines.find { it.startsWith("# WAIT") }
-                    if (waitCommand != null) {
-                         try {
-                             pauseMinutes = waitCommand.removePrefix("# WAIT").trim().toIntOrNull()
-                             if (pauseMinutes != null && pauseMinutes > 0) {
-                                 Log.i(TAG, "AI requested WAIT for $pauseMinutes minutes.")
-                                 aiResponseText = lines.firstOrNull { !it.startsWith("# WAIT") } ?: "Okay, pausing nags for $pauseMinutes minute${if (pauseMinutes > 1) "s" else ""}."
-                             } else {
-                                 Log.w(TAG, "Invalid minutes in WAIT command: $waitCommand")
-                                 aiResponseText = rawResponse
-                                 pauseMinutes = null
-                             }
-                         } catch (e: Exception) {
-                             Log.e(TAG, "Error parsing WAIT command", e)
-                             aiResponseText = rawResponse
-                             pauseMinutes = null
-                         }
-                    } else {
-                        aiResponseText = rawResponse
-                    }
-                 } else {
-                    Log.w(TAG, "Gemini response (reply) was null.")
-                    errorMessage = "(Error getting response)"
-                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API for reply", e)
-                errorMessage = "(API Error: ${e.message})"
-            }
-
-            // Add AI response/error to history
-            val messageToAdd = aiResponseText ?: errorMessage ?: "(Unknown Error)"
-            conversationHistoryManager.addAIMessage(messageToAdd)
-            
-            // Set pause if needed
-            if (pauseMinutes != null && pauseMinutes > 0) {
-                 val pauseMillis = TimeUnit.MINUTES.toMillis(pauseMinutes.toLong())
-                 naggingPausedUntil.set(System.currentTimeMillis() + pauseMillis)
-                 Log.i(TAG, "Nagging paused until: ${Date(naggingPausedUntil.get())}")
-            }
-            
-            // Update notification with the new AI response
-            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-        }
-    }
-
-    // Renamed and modified to handle initial prompt generation if needed
-    private fun sendNotification(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        Log.d(TAG, "sendNotification called for $appName. History empty? ${conversationHistoryManager.getUserVisibleHistory().isEmpty()}")
-        if (conversationHistoryManager.getUserVisibleHistory().isEmpty()) {
-            // History is empty. This means a new session needs to be fully initialized.
-            // This can happen if the app was already wasteful when monitoring started,
-            // and this is the first sendNotification for it.
-            Log.i(TAG, "History is empty in sendNotification. Starting a new session for $appName.")
-            conversationHistoryManager.startNewSession(appName) // This populates history with the initial AI message.
-            // Now, user-visible history is NOT empty. We directly show this initial message.
-            showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-        } else {
-            // History exists. This means an initial message (or more) is already there.
-            // We need the AI to generate a *new* message based on the current context and existing history.
-            Log.d(TAG, "History exists, generating subsequent AI response for $appName.")
-            aiManager.generateSubsequentResponse(
-                appName = appName,
-                sessionTimeMs = sessionTimeMs,
-                dailyTimeMs = dailyTimeMs,
-                onResponse = { response: String -> // response is the AI's new nag/message
-                    conversationHistoryManager.addAIMessage(response) // Add new AI nag to history
-                    showConversationNotification(appName, sessionTimeMs, dailyTimeMs)
-                }
-            )
-        }
-    }
-
-    // Modified to remove the initial message fallback
     private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
         Log.d(TAG, "showConversationNotification called. History size: ${conversationHistoryManager.getUserVisibleHistory().size}")
+        
         if (conversationHistoryManager.getUserVisibleHistory().isEmpty()) {
-             Log.w(TAG, "showConversationNotification called with empty history. Notification might appear empty or not show.")
+             Log.w(TAG, "showConversationNotification called with empty history. No notification to show.")
+             return
         }
 
-        // --- Remote Input Action with Context (Unchanged) --- 
+        // Remote Input Action with Context
         val remoteInput: RemoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).run { setLabel("Reply...").build() }
         val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
             action = ACTION_HANDLE_REPLY
@@ -450,7 +483,7 @@ class AppUsageMonitorService : Service() {
             .setAllowGeneratedReplies(true)
             .build()
 
-        // --- Build MessagingStyle (Unchanged) --- 
+        // Build MessagingStyle
         val messagingStyle = NotificationCompat.MessagingStyle(userPerson)
         conversationHistoryManager.getUserVisibleHistory().forEach { msg ->
             val notificationMessage = NotificationCompat.MessagingStyle.Message(
@@ -459,43 +492,27 @@ class AppUsageMonitorService : Service() {
             messagingStyle.addMessage(notificationMessage)
         }
         
-        // --- Build Notification (Unchanged) --- 
-        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+        // Build Notification
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setStyle(messagingStyle)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(false) 
-            .setOngoing(false) 
             .addAction(action)
-            
-         val contentText = conversationHistoryManager.getUserVisibleHistory().lastOrNull()?.text ?: "Conversation started..."
-         notificationBuilder.setContentText(contentText)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(false)
+            .setOngoing(false)
 
-         try {
-             notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build())
-             Log.d(TAG, "Conversation notification posted/updated successfully.")
-         } catch (e: Exception) {
-             Log.e(TAG, "Error posting/updating conversation notification", e)
-         }
-    }
-
-    private fun getReadableAppName(packageName: String?): String {
-         return when (packageName) {
-            "com.facebook.katana" -> "Facebook"
-            "com.instagram.android" -> "Instagram"
-            "com.twitter.android" -> "Twitter"
-            "com.google.android.youtube" -> "YouTube"
-            null -> "Unknown App"
-            else -> packageName // Return package name if not in our known list
+        try {
+            notificationManager.notify(NOTIFICATION_ID, builder.build())
+            Log.d(TAG, "Conversation notification sent successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending conversation notification", e)
         }
     }
 
     private fun updateStatsNotification() {
-        Log.d(TAG, "updateStatsNotification called")
-        val notification = createStatsNotification()
         try {
-            notificationManager.notify(STATS_NOTIFICATION_ID, notification)
-            Log.d(TAG, "Stats notification updated successfully.")
+            notificationManager.notify(STATS_NOTIFICATION_ID, createStatsNotification())
         } catch (e: Exception) {
             Log.e(TAG, "Error updating stats notification", e)
         }
@@ -504,16 +521,11 @@ class AppUsageMonitorService : Service() {
     private fun createStatsNotification(): android.app.Notification {
         val monitoringStatus = "Monitoring: Active"
         val currentAppName = if (currentApp != null && isWastefulApp(currentApp!!)) {
-            when (currentApp) {
-                "com.facebook.katana" -> "Facebook"
-                "com.instagram.android" -> "Instagram"
-                "com.twitter.android" -> "Twitter"
-                "com.google.android.youtube" -> "YouTube"
-                else -> "Unknown Wasteful App"
-            }
+            getReadableAppName(currentApp!!)
         } else {
             "No distracting app active"
         }
+        
         Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms")
         val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)
             .setContentTitle("Time Linter")
@@ -528,14 +540,65 @@ class AppUsageMonitorService : Service() {
                  .setSummaryText("Time Linter Stats")
             )
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-             // *** Use MIN priority for silent stats ***
             .setPriority(NotificationCompat.PRIORITY_MIN) 
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSound(null) 
-            .setVibrate(longArrayOf(0L)) // Ensure vibration is off
+            .setVibrate(longArrayOf(0L))
             
         return builder.build()
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Conversation Channel (High Priority)
+            val conversationChannel = NotificationChannel(
+                CHANNEL_ID,
+                "Conversation",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Time Linter conversation notifications"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+
+            // Stats Channel (Low Priority)
+            val statsChannel = NotificationChannel(
+                STATS_CHANNEL_ID,
+                "Statistics",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                description = "Time Linter statistics and monitoring status"
+                enableVibration(false)
+                setShowBadge(false)
+                setSound(null, null)
+            }
+
+            notificationManager.createNotificationChannels(listOf(conversationChannel, statsChannel))
+            Log.d(TAG, "Notification channels created")
+        }
+    }
+
+    private fun getReadableAppName(packageName: String): String {
+        return try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            // Fallback to common app names
+            when (packageName) {
+                "com.facebook.katana" -> "Facebook"
+                "com.instagram.android" -> "Instagram"
+                "com.twitter.android" -> "Twitter"
+                "com.google.android.youtube" -> "YouTube"
+                "com.netflix.mediaclient" -> "Netflix"
+                "com.reddit.frontpage" -> "Reddit"
+                "com.tiktok.android" -> "TikTok"
+                "com.snapchat.android" -> "Snapchat"
+                "com.pinterest" -> "Pinterest"
+                "com.linkedin.android" -> "LinkedIn"
+                else -> packageName.substringAfterLast('.').replaceFirstChar { it.uppercase() }
+            }
+        }
     }
 
     private fun formatDuration(millis: Long): String {
@@ -558,41 +621,6 @@ class AppUsageMonitorService : Service() {
         return calendar.timeInMillis
     }
 
-    private fun createNotificationChannels() {
-        Log.d(TAG, "createNotificationChannels called")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Channel for nagging/reply notifications (HIGH importance for Heads-Up)
-             Log.d(TAG, "Creating channel $CHANNEL_ID (High Importance)")
-            val name = "Time Linter Conversations"
-            val descriptionText = "Notifications about app usage and AI replies"
-             // *** Use HIGH importance for Heads-Up ***
-            val importance = NotificationManager.IMPORTANCE_HIGH 
-            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
-                description = descriptionText
-                 // High importance channels usually bypass DND, which might be desired here?
-                 // setBypassDnd(true) 
-            }
-            notificationManager.createNotificationChannel(channel)
-
-            // Channel for PERSISTENT STATS notification (MIN importance and silent)
-             Log.d(TAG, "Creating channel $STATS_CHANNEL_ID (Min Importance, Silent)")
-            val statsName = "Time Linter Stats"
-            val statsDescription = "Persistent notification showing usage statistics"
-             // *** Use MIN importance for stats channel ***
-            val statsChannel = NotificationChannel(STATS_CHANNEL_ID, statsName, NotificationManager.IMPORTANCE_MIN).apply { 
-                description = statsDescription
-                setSound(null, null) 
-                enableVibration(false)
-                setShowBadge(false) 
-            }
-            notificationManager.createNotificationChannel(statsChannel)
-             Log.d(TAG, "Notification channels created.")
-        } else {
-             // On older versions, control sound/vibration directly on the Notification builder
-             Log.d(TAG, "Skipping channel creation (SDK < O)")
-        }
-    }
-
     private fun readRawResource(resourceId: Int): String {
         return try {
             resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
@@ -602,13 +630,13 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
-        executor.shutdownNow()
         serviceScope.cancel()
-        isMonitoringScheduled = false // Reset flag when service is destroyed
+        executor.shutdown()
+        isMonitoringScheduled = false
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 } 

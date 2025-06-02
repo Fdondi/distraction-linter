@@ -30,6 +30,11 @@ fun SettingsScreen(
     var selectedApps by remember { mutableStateOf(setOf<String>()) }
     var allApps by remember { mutableStateOf(listOf<AppInfo>()) }
     var showPermissionDialog by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(0) }
+    
+    // Timer settings
+    var observeTimerMinutes by remember { mutableStateOf(SettingsManager.getObserveTimerMinutes(context)) }
+    var responseTimerMinutes by remember { mutableStateOf(SettingsManager.getResponseTimerMinutes(context)) }
     
     // Function to check if we can query packages
     fun canQueryPackages(): Boolean {
@@ -132,7 +137,7 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Time-Wasting Apps") },
+                title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -146,108 +151,234 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            if (showPermissionDialog) {
-                AlertDialog(
-                    onDismissRequest = { showPermissionDialog = false },
-                    title = { Text("Permission Required") },
-                    text = { 
-                        Text(
-                            "Time Linter needs permission to see your installed apps. " +
-                            "Please grant this permission in your system settings to continue."
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                // Open app settings
-                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = android.net.Uri.fromParts("package", context.packageName, null)
-                                }
-                                context.startActivity(intent)
-                                showPermissionDialog = false
-                            }
-                        ) {
-                            Text("Open Settings")
-                        }
-                    },
-                    dismissButton = {
-                        Button(onClick = onNavigateBack) {
-                            Text("Cancel")
-                        }
-                    }
+            // Tab Row
+            TabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Apps") }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("Timers") }
                 )
             }
 
-            // Search bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                placeholder = { Text("Search apps...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                singleLine = true
-            )
-
-            // Selected apps section
-            if (selectedApps.isNotEmpty()) {
-                Text(
-                    "Selected Apps",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-                LazyColumn(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(
-                        allApps.filter { it.packageName in selectedApps }
-                            .sortedBy { it.appName }
-                    ) { app ->
-                        AppListItem(
-                            app = app,
-                            isSelected = true,
-                            onToggleSelection = { isSelected ->
-                                selectedApps = if (isSelected) {
-                                    selectedApps + app.packageName
-                                } else {
-                                    selectedApps - app.packageName
+            when (selectedTab) {
+                0 -> {
+                    // Apps Tab Content
+                    if (showPermissionDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showPermissionDialog = false },
+                            title = { Text("Permission Required") },
+                            text = { 
+                                Text(
+                                    "Time Linter needs permission to see your installed apps. " +
+                                    "Please grant this permission in your system settings to continue."
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        // Open app settings
+                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = android.net.Uri.fromParts("package", context.packageName, null)
+                                        }
+                                        context.startActivity(intent)
+                                        showPermissionDialog = false
+                                    }
+                                ) {
+                                    Text("Open Settings")
                                 }
-                                TimeWasterAppManager.saveSelectedApps(context, selectedApps)
+                            },
+                            dismissButton = {
+                                Button(onClick = onNavigateBack) {
+                                    Text("Cancel")
+                                }
                             }
                         )
+                    }
+
+                    // Search bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        placeholder = { Text("Search apps...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                        singleLine = true
+                    )
+
+                    // Selected apps section
+                    if (selectedApps.isNotEmpty()) {
+                        Text(
+                            "Selected Apps",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                        LazyColumn(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(
+                                allApps.filter { it.packageName in selectedApps }
+                                    .sortedBy { it.appName }
+                            ) { app ->
+                                AppListItem(
+                                    app = app,
+                                    isSelected = true,
+                                    onToggleSelection = { isSelected ->
+                                        selectedApps = if (isSelected) {
+                                            selectedApps + app.packageName
+                                        } else {
+                                            selectedApps - app.packageName
+                                        }
+                                        TimeWasterAppManager.saveSelectedApps(context, selectedApps)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // All apps section
+                    Text(
+                        "All Apps",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(
+                            allApps.filter { 
+                                it.packageName !in selectedApps &&
+                                (searchQuery.isEmpty() || 
+                                 it.appName.matchesSearch(searchQuery))
+                            }
+                        ) { app ->
+                            AppListItem(
+                                app = app,
+                                isSelected = false,
+                                onToggleSelection = { isSelected ->
+                                    selectedApps = if (isSelected) {
+                                        selectedApps + app.packageName
+                                    } else {
+                                        selectedApps - app.packageName
+                                    }
+                                    TimeWasterAppManager.saveSelectedApps(context, selectedApps)
+                                }
+                            )
+                        }
                     }
                 }
-            }
-
-            // All apps section
-            Text(
-                "All Apps",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-            LazyColumn(
-                modifier = Modifier.weight(1f)
-            ) {
-                items(
-                    allApps.filter { 
-                        it.packageName !in selectedApps &&
-                        (searchQuery.isEmpty() || 
-                         it.appName.matchesSearch(searchQuery))
-                    }
-                ) { app ->
-                    AppListItem(
-                        app = app,
-                        isSelected = false,
-                        onToggleSelection = { isSelected ->
-                            selectedApps = if (isSelected) {
-                                selectedApps + app.packageName
-                            } else {
-                                selectedApps - app.packageName
+                1 -> {
+                    // Timers Tab Content
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        // Observe Timer Setting
+                        Card(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "Observe Timer",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "How long to wait before checking if you're wasting time again",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text("${observeTimerMinutes} minutes")
+                                    Slider(
+                                        value = observeTimerMinutes.toFloat(),
+                                        onValueChange = { 
+                                            observeTimerMinutes = it.toInt()
+                                            SettingsManager.setObserveTimerMinutes(context, observeTimerMinutes)
+                                        },
+                                        valueRange = 1f..30f,
+                                        steps = 28,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
-                            TimeWasterAppManager.saveSelectedApps(context, selectedApps)
                         }
-                    )
+
+                        // Response Timer Setting
+                        Card(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "Response Timer",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "How long to wait for your response before considering it ignored",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text("${responseTimerMinutes} minute${if (responseTimerMinutes > 1) "s" else ""}")
+                                    Slider(
+                                        value = responseTimerMinutes.toFloat(),
+                                        onValueChange = { 
+                                            responseTimerMinutes = it.toInt()
+                                            SettingsManager.setResponseTimerMinutes(context, responseTimerMinutes)
+                                        },
+                                        valueRange = 1f..10f,
+                                        steps = 8,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Information Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "How Timers Work",
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again\n" +
+                                          "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

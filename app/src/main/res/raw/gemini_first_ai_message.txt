@@ -1,1 +1,1 @@
-Hi, I see you're using {{APP_NAME}}
+Hi, I see you're using {{APP_NAME}}. How's your day going?

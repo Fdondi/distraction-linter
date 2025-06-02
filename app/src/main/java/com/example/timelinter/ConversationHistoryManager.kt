@@ -1,5 +1,6 @@
 package com.example.timelinter
 
+import android.content.Context
 import android.util.Log
 import androidx.core.app.Person
 import com.google.ai.client.generativeai.type.Content
@@ -50,8 +51,10 @@ class UserConversationHistory {
 }
 
 class APIConversationHistory(
+    private val context: Context,
     private val systemPrompt: String,
-    private val initialAIMessageTemplate: String,
+    private val aiMemoryTemplate: String,
+    private val userInfoTemplate: String,
     private val userInteractionTemplate: String
 ) {
     private val TAG = "APIChatHistoryManager"
@@ -78,6 +81,48 @@ class APIConversationHistory(
 
     fun addSystemMessage(messageText: String) {
         conversation.add(content(role = "user") { text(messageText) })
+        logHistory()
+    }
+
+    fun initializeConversation(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        conversation.clear()
+        
+        // Step 1: Add system prompt (undecorated)
+        if (systemPrompt.isBlank()) {
+            throw IllegalArgumentException("System prompt is blank")
+        }
+        addSystemMessage(systemPrompt)
+        Log.d(TAG, "Added system prompt")
+        
+        // Step 2: Add AI memory (using REMEMBER tool results)
+        val memories = AIMemoryManager.getAllMemories(context)
+        if (memories.isNotEmpty()) {
+            val memoryMessage = aiMemoryTemplate.replace("{{AI_MEMORY}}", memories)
+            conversation.add(content(role = "model") { text(memoryMessage) })
+            Log.d(TAG, "Added AI memories: ${memories.length} characters")
+        } else {
+            // Add empty memory template
+            val emptyMemoryMessage = aiMemoryTemplate.replace("{{AI_MEMORY}}", "No previous memories.")
+            conversation.add(content(role = "model") { text(emptyMemoryMessage) })
+            Log.d(TAG, "Added empty AI memory")
+        }
+        
+        // Step 3: Add user status (decorated with app statistics)
+        val userStatusMessage = userInfoTemplate
+            .replace("{{FIXED_USER_PROMPT}}", "User is currently using time-wasting apps")
+            .replace("{{CURRENT_USER_PROMPT}}", "Currently on $appName")
+            .replace("{{AUTOMATED_DATA}}", "No additional data available")
+        
+        // Decorate with app statistics like regular user messages
+        val decoratedUserStatus = userInteractionTemplate
+            .replace("{{APP_NAME}}", appName)
+            .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
+            .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
+            .replace("{{USER_MESSAGE}}", userStatusMessage)
+        
+        conversation.add(content(role = "user") { text(decoratedUserStatus) })
+        Log.d(TAG, "Added decorated user status")
+        
         logHistory()
     }
 
@@ -109,38 +154,34 @@ class APIConversationHistory(
 }
 
 class ConversationHistoryManager(
+    private val context: Context,
     private val systemPrompt: String,
-    private val initialAIMessageTemplate: String,
+    private val aiMemoryTemplate: String,
+    private val userInfoTemplate: String,
     private val userInteractionTemplate: String
 ) {
     private val TAG = "ConvHistoryManager"
     private val userConversationHistory = UserConversationHistory()
-    private val apiConversationHistory = APIConversationHistory(systemPrompt, initialAIMessageTemplate, userInteractionTemplate)
+    private val apiConversationHistory = APIConversationHistory(
+        context, systemPrompt, aiMemoryTemplate, userInfoTemplate, userInteractionTemplate
+    )
 
     init {
         Log.d(TAG, "ConversationHistoryManager initialized with systemPrompt: ${systemPrompt.take(200)}...")
     }
 
-    private fun generateInitialAIMessageForSession(appName: String): String {
-        return initialAIMessageTemplate.replace("{{APP_NAME}}", appName)
-    }
-
-    fun startNewSession(appName: String) {
-        apiConversationHistory.clear()
-        userConversationHistory.clear()
-
-        if (systemPrompt.isBlank()) {
-            throw IllegalArgumentException("System prompt is blank. API history impossible")
-        }
-        apiConversationHistory.addSystemMessage(systemPrompt)
+    fun startNewSession(appName: String, sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
+        Log.i(TAG, "Starting new session for $appName")
         
-        val actualInitialAIMessage = generateInitialAIMessageForSession(appName)
-
-        if (actualInitialAIMessage.isBlank()) {
-            throw IllegalArgumentException("Initial AI message could not be generated (template likely blank or appName missing). User-visible conversation impossible")
-        }
-        userConversationHistory.addAIMessage(actualInitialAIMessage)
-        apiConversationHistory.addAIMessage(actualInitialAIMessage)
+        // Clear both histories
+        userConversationHistory.clear()
+        
+        // Initialize API conversation with the 3-step process from interaction.md
+        apiConversationHistory.initializeConversation(appName, sessionTimeMs, dailyTimeMs)
+        
+        // Note: The initial conversation is NOT added to user-visible history
+        // as per interaction.md: "This initial conversation will be added to the AI history 
+        // and sent every time, but NOT added to the UI visible conversation."
         
         logHistoriesState("After startNewSession for $appName")
     }
@@ -155,20 +196,28 @@ class ConversationHistoryManager(
         apiConversationHistory.addAIMessage(messageText)
     }
 
-    fun getHistoryForAPI(): List<Content> = apiConversationHistory.getHistory()
-
-    fun getUserVisibleHistory(): List<ChatMessage> = userConversationHistory.getHistoryForUI()
-    
-    fun clearHistories() {
-        apiConversationHistory.clear()
-        userConversationHistory.clear()
-        Log.d(TAG, "Both API and User-visible conversation histories cleared.")
+    fun addNoResponseMessage(currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        // Add "*no response*" to AI conversation only (decorated), not to UI
+        apiConversationHistory.addUserMessage("*no response*", currentAppName, sessionTimeMs, dailyTimeMs)
+        Log.d(TAG, "Added '*no response*' to API history only")
     }
 
-    private fun logHistoriesState(event: String) {
-        Log.d(TAG, "--- Conversation Histories State ($event) ---")
+    fun getHistoryForAPI(): List<Content> = apiConversationHistory.getHistory()
+
+    fun getUserVisibleHistory(): List<ChatMessage> = userConversationHistory.getHistory()
+
+    fun clearHistories() {
+        userConversationHistory.clear()
+        apiConversationHistory.clear()
+        Log.d(TAG, "Cleared all conversation histories")
+    }
+
+    private fun logHistoriesState(context: String) {
+        Log.d(TAG, "=== $context ===")
+        Log.d(TAG, "API History size: ${apiConversationHistory.getHistory().size}")
+        Log.d(TAG, "User History size: ${userConversationHistory.getHistory().size}")
         userConversationHistory.logHistory()
         apiConversationHistory.logHistory()
-        Log.d(TAG, "--- End of State ($event) ---")
+        Log.d(TAG, "=== End $context ===")
     }
 } 
