@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.UserManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
@@ -371,37 +372,65 @@ class AppUsageMonitorService : Service() {
     private fun getCurrentAppUsage(): AppInfo? {
         val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
-        val beginTime = endTime - 1000 * checkIntervalSeconds
+        // Look back further to get more reliable events
+        val beginTime = endTime - 1000 * 60 * 2 // 2 minutes
 
         try {
-            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
-            if (stats != null && stats.isNotEmpty()) {
-                var recentStat: UsageStats? = null
-                for (usageStats in stats) {
-                    // Filter out self and empty package names
-                    if (usageStats.packageName == applicationContext.packageName || usageStats.packageName.isEmpty()) {
-                        continue 
-                    }
-                    if (recentStat == null || usageStats.lastTimeUsed > recentStat.lastTimeUsed) {
-                        recentStat = usageStats
-                    }
-                }
-                
-                if (recentStat != null) {
-                    val readableName = getReadableAppName(recentStat.packageName)
-                    val isWasteful = isWastefulApp(recentStat.packageName)
-                    
-                    return AppInfo(
-                        packageName = recentStat.packageName,
-                        readableName = readableName,
-                        isWasteful = isWasteful
-                    )
+            // Check if user is unlocked (required for Android R+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                val userManager = getSystemService(Context.USER_SERVICE) as android.os.UserManager
+                if (!userManager.isUserUnlocked) {
+                    Log.w(TAG, "User is locked, cannot query usage events")
+                    return null
                 }
             }
+
+            // Use queryEvents instead of queryUsageStats for real-time detection
+            val usageEvents = usageStatsManager.queryEvents(beginTime, endTime)
+            if (usageEvents == null) {
+                Log.w(TAG, "queryEvents returned null")
+                return null
+            }
+
+            var currentForegroundApp: String? = null
+            val event = android.app.usage.UsageEvents.Event()
+            
+            // Process events chronologically to find the most recent foreground app
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event)
+                
+                // Filter out our own app and empty package names
+                if (event.packageName == applicationContext.packageName || event.packageName.isEmpty()) {
+                    continue
+                }
+                
+                // Look for ACTIVITY_RESUMED events (app comes to foreground)
+                if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
+                    currentForegroundApp = event.packageName
+                } else if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED) {
+                    // If the same app that was in foreground gets paused, it's no longer foreground
+                    if (event.packageName == currentForegroundApp) {
+                        currentForegroundApp = null
+                    }
+                }
+            }
+            
+            // If we found a foreground app, return its info
+            if (currentForegroundApp != null) {
+                val readableName = getReadableAppName(currentForegroundApp)
+                val isWasteful = isWastefulApp(currentForegroundApp)
+                
+                return AppInfo(
+                    packageName = currentForegroundApp,
+                    readableName = readableName,
+                    isWasteful = isWasteful
+                )
+            }
+            
         } catch (e: SecurityException) {
-            Log.e(TAG, "Permission error querying usage stats", e)
+            Log.e(TAG, "Permission error querying usage events", e)
         } catch (e: Exception) {
-            Log.e(TAG, "Error querying usage stats", e)
+            Log.e(TAG, "Error querying usage events", e)
         }
         
         return null
