@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     private var showHeadsUpInfoDialog by mutableStateOf(false)
     private var isMonitoringActive by mutableStateOf(false)
     private var apiKeyPresent by mutableStateOf(false)
+    private var userNotes by mutableStateOf("")
 
     // Launcher for Notification Permission
     private val requestNotificationPermissionLauncher = registerForActivityResult(
@@ -52,6 +53,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Check for API Key initially
         apiKeyPresent = ApiKeyManager.hasKey(this)
+        // Load user notes
+        userNotes = ApiKeyManager.getUserNotes(this)
 
         setContent {
             MaterialTheme {
@@ -82,7 +85,12 @@ class MainActivity : ComponentActivity() {
                             startMonitoringServiceIfPermitted()
                         },
                         onGoToChannelSettings = { openNotificationChannelSettings() },
-                        onOpenSettings = { showSettings = true }
+                        onOpenSettings = { showSettings = true },
+                        userNotes = userNotes,
+                        onSaveUserNotes = {
+                            ApiKeyManager.saveUserNotes(this, it)
+                            userNotes = it
+                        }
                     )
                 }
             }
@@ -95,6 +103,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Re-check API key presence on resume
         apiKeyPresent = ApiKeyManager.hasKey(this)
+        // Re-load user notes on resume
+        userNotes = ApiKeyManager.getUserNotes(this)
         // Re-check permissions if monitoring was supposed to be active
         if (isMonitoringActive && (!hasNotificationPermission() || !hasUsageStatsPermission())) {
             isMonitoringActive = false // Stop monitoring if permission revoked
@@ -256,9 +266,17 @@ fun TimeLinterApp(
     showHeadsUpInfoDialog: Boolean,
     onDismissHeadsUpInfoDialog: () -> Unit,
     onGoToChannelSettings: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    userNotes: String,
+    onSaveUserNotes: (String) -> Unit
 ) {
     var apiKeyInput by rememberSaveable { mutableStateOf("") }
+    var userNotesInput by rememberSaveable { mutableStateOf(userNotes) }
+    
+    // Update local state when userNotes prop changes
+    LaunchedEffect(userNotes) {
+        userNotesInput = userNotes
+    }
 
     Scaffold(
         topBar = {
@@ -302,6 +320,28 @@ fun TimeLinterApp(
                 }
                 Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
             }
+
+            // --- User Notes Section ---
+            Text(
+                text = "Personal Notes for AI",
+                style = MaterialTheme.typography.titleMedium
+            )
+            OutlinedTextField(
+                value = userNotesInput,
+                onValueChange = { userNotesInput = it },
+                label = { Text("Add context or goals for the AI...") },
+                placeholder = { Text("e.g., I'm trying to focus on work, help me stay productive") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                maxLines = 4
+            )
+            Button(
+                onClick = { onSaveUserNotes(userNotesInput) },
+                enabled = userNotesInput != userNotes // Enable only if text has changed
+            ) {
+                Text("Save Notes")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = onToggleMonitoring,

@@ -11,6 +11,7 @@ object ApiKeyManager {
     private const val PREFERENCE_FILE_KEY = "com.example.timelinter.encrypted_prefs"
     private const val API_KEY_PREF = "gemini_api_key"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
+    private const val USER_NOTES_PREF = "user_notes"
     private const val TAG = "ApiKeyManager"
 
     private fun getEncryptedPreferences(context: Context): SharedPreferences? {
@@ -65,5 +66,25 @@ object ApiKeyManager {
         val shown = getEncryptedPreferences(context)?.getBoolean(HEADS_UP_INFO_SHOWN_PREF, false) ?: false
         Log.d(TAG, "Heads-up info shown flag checked: $shown")
         return shown
+    }
+
+    fun saveUserNotes(context: Context, notes: String) {
+        getEncryptedPreferences(context)?.edit()?.putString(USER_NOTES_PREF, notes)?.apply()
+        Log.i(TAG, "User notes saved successfully.")
+    }
+
+    fun getUserNotes(context: Context): String {
+        val notes = getEncryptedPreferences(context)?.getString(USER_NOTES_PREF, "") ?: ""
+        Log.d(TAG, "User notes loaded: ${if (notes.isEmpty()) "Empty" else "Found (${notes.length} chars)"}")
+        return notes
+    }
+
+    fun hasUserNotes(context: Context): Boolean {
+        return getUserNotes(context).isNotEmpty()
+    }
+
+    fun clearUserNotes(context: Context) {
+        getEncryptedPreferences(context)?.edit()?.remove(USER_NOTES_PREF)?.apply()
+        Log.i(TAG, "User notes cleared.")
     }
 } 

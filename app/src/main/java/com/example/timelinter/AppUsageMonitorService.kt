@@ -507,7 +507,7 @@ class AppUsageMonitorService : Service() {
             putExtra(EXTRA_DAILY_TIME_MS, dailyTimeMs)
         }
         val replyPendingIntent: PendingIntent = PendingIntent.getService(this, NOTIFICATION_ID, replyIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
-        val action: NotificationCompat.Action = NotificationCompat.Action.Builder(R.drawable.ic_launcher_foreground, "Reply", replyPendingIntent)
+        val action: NotificationCompat.Action = NotificationCompat.Action.Builder(R.mipmap.ic_launcher, "Reply", replyPendingIntent)
             .addRemoteInput(remoteInput)
             .setAllowGeneratedReplies(true)
             .build()
@@ -523,7 +523,7 @@ class AppUsageMonitorService : Service() {
         
         // Build Notification
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setStyle(messagingStyle)
             .addAction(action)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -568,7 +568,7 @@ class AppUsageMonitorService : Service() {
                 """.trimIndent())
                  .setSummaryText("Time Linter Stats")
             )
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MIN) 
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

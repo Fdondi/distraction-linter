@@ -108,9 +108,16 @@ class APIConversationHistory(
         }
         
         // Step 3: Add user status (decorated with app statistics)
+        val userNotes = ApiKeyManager.getUserNotes(context)
+        val currentUserPrompt = if (userNotes.isNotEmpty()) {
+            userNotes
+        } else {
+            "Currently on $appName"
+        }
+        
         val userStatusMessage = userInfoTemplate
             .replace("{{FIXED_USER_PROMPT}}", "User is currently using time-wasting apps")
-            .replace("{{CURRENT_USER_PROMPT}}", "Currently on $appName")
+            .replace("{{CURRENT_USER_PROMPT}}", currentUserPrompt)
             .replace("{{AUTOMATED_DATA}}", "No additional data available")
         
         // Decorate with app statistics like regular user messages
