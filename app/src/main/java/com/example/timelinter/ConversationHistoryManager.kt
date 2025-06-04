@@ -92,7 +92,7 @@ class APIConversationHistory(
             throw IllegalArgumentException("System prompt is blank")
         }
         addSystemMessage(systemPrompt)
-        Log.d(TAG, "Added system prompt")
+        Log.d(TAG, "Added system prompt: $systemPrompt")
         
         // Step 2: Add AI memory (using REMEMBER tool results)
         val memories = AIMemoryManager.getAllMemories(context)
@@ -118,17 +118,18 @@ class APIConversationHistory(
         val userStatusMessage = userInfoTemplate
             .replace("{{FIXED_USER_PROMPT}}", "User is currently using time-wasting apps")
             .replace("{{CURRENT_USER_PROMPT}}", currentUserPrompt)
-            .replace("{{AUTOMATED_DATA}}", "No additional data available")
+            .replace("{{AUTOMATED_DATA}}", "")
         
         // Decorate with app statistics like regular user messages
         val decoratedUserStatus = userInteractionTemplate
+            .replace("{{CURRENT_TIME_AND_DATE}}", Date().toString())
             .replace("{{APP_NAME}}", appName)
             .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
             .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
             .replace("{{USER_MESSAGE}}", userStatusMessage)
         
         conversation.add(content(role = "user") { text(decoratedUserStatus) })
-        Log.d(TAG, "Added decorated user status")
+        Log.d(TAG, "Added decorated user status: $decoratedUserStatus")
         
         logHistory()
     }
