@@ -58,6 +58,10 @@ class AppUsageMonitorService : Service() {
     private var currentApp: String? = null
     private var lastAppChangeTime = AtomicLong(System.currentTimeMillis())
 
+    // Token bucket threshold tracking
+    private val bucketRemainingMs = AtomicLong(0)
+    private val lastBucketUpdateTime = AtomicLong(System.currentTimeMillis())
+
     // Coroutine scope for background tasks like API calls
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -95,6 +99,14 @@ class AppUsageMonitorService : Service() {
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
         aiPerson = Person.Builder().setName("Time Coach").setKey("ai").setBot(true).build()
+
+        // Initialize token bucket with maximum threshold
+        val maxThresholdMs = TimeUnit.MINUTES.toMillis(
+            SettingsManager.getMaxThresholdMinutes(this).toLong()
+        )
+        val persistedRemaining = SettingsManager.getThresholdRemainingMs(this, maxThresholdMs)
+        bucketRemainingMs.set(minOf(persistedRemaining, maxThresholdMs))
+        lastBucketUpdateTime.set(System.currentTimeMillis())
 
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
@@ -203,9 +215,15 @@ class AppUsageMonitorService : Service() {
             Log.v(TAG, "Still within observe timer, waiting...")
             return
         }
-        
+
+        // Check threshold bucket
+        if (bucketRemainingMs.get() > 0) {
+            Log.v(TAG, "Threshold not yet exceeded (remaining ${bucketRemainingMs.get()} ms)")
+            return
+        }
+
         // Threshold exceeded - start conversation
-        Log.i(TAG, "Threshold exceeded for ${appInfo.readableName}, starting conversation")
+        Log.i(TAG, "Threshold exceeded for ${appInfo.readableName}, starting conversation (bucket empty)")
         
         // Step 1b: Create initial AI history and start conversation
         conversationHistoryManager.startNewSession(
@@ -447,6 +465,50 @@ class AppUsageMonitorService : Service() {
             interactionStateManager.resetToObserving()
         }
 
+        // ---------------- Token bucket update ----------------
+        val now = System.currentTimeMillis()
+        val delta = now - lastBucketUpdateTime.get()
+        lastBucketUpdateTime.set(now)
+
+        val maxThresholdMs = TimeUnit.MINUTES.toMillis(
+            SettingsManager.getMaxThresholdMinutes(this).toLong()
+        )
+        val replenishIntervalMs = TimeUnit.MINUTES.toMillis(
+            SettingsManager.getReplenishIntervalMinutes(this).toLong()
+        )
+        val replenishAmountMs = TimeUnit.MINUTES.toMillis(
+            SettingsManager.getReplenishAmountMinutes(this).toLong()
+        )
+
+        if (delta > 0) {
+            if (isCurrentlyWasteful) {
+                // Consume tokens
+                bucketRemainingMs.addAndGet(-delta)
+            } else {
+                // Replenish tokens proportionally to the elapsed time
+                if (replenishIntervalMs > 0) {
+                    val tokensToAdd = (delta / replenishIntervalMs) * replenishAmountMs
+                    if (tokensToAdd > 0) {
+                        bucketRemainingMs.addAndGet(tokensToAdd)
+                    }
+                }
+            }
+
+            // Clamp to [0, max]
+            if (bucketRemainingMs.get() > maxThresholdMs) {
+                bucketRemainingMs.set(maxThresholdMs)
+            } else if (bucketRemainingMs.get() < 0) {
+                bucketRemainingMs.set(0)
+            }
+
+            // Persist value occasionally (every minute)
+            if (delta >= TimeUnit.MINUTES.toMillis(1)) {
+                SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
+            }
+        }
+
+        // ---------------- Existing time tracking logic ----------------
+
         // App change detection and time accumulation logic
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
@@ -662,6 +724,8 @@ class AppUsageMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
+        // Persist bucket value so it survives service restarts
+        SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
         serviceScope.cancel()
         executor.shutdown()
         isMonitoringScheduled = false

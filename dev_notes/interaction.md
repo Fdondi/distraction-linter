@@ -6,7 +6,9 @@ MESSAGES_FOLDER=app\src\main\res\raw
 They get saved to the UI visible conversation undecoarated. 
 
 AI replies are saved to AI history unaltered. 
-Tehy are saved to the UI visible conversation stripped of tool uses (lines starting with #) 
+They are saved to the UI visible conversation stripped of tool uses (lines starting with #)
+
+The threshold starts at a configurable amount (by default 5 minutes) and replenishes by a number of minutes configurable in settings (by default, 1 minute every 10). When it hits the maximum amount again, the session resets; any new conversation will start form scratch (except what the AI chose to save).
 
 0) app wakes up
 1a) threshold of wasted time not exceeded. Wait observe_timer, then go to 0)

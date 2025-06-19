@@ -64,7 +64,6 @@ android {
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -73,6 +72,14 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.google.ai.client.generativeai)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.material.icons.extended)
+    
+    // Handlebars for proper templating
+    implementation("com.github.jknack:handlebars:4.4.0")
+    
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -83,11 +90,4 @@ dependencies {
 
     // AndroidX Security for EncryptedSharedPreferences
     implementation(libs.androidx.security.crypto)
-
-    // Google AI (Gemini SDK)
-    // Ensure this matches your libs.versions.toml or use the direct string
-    implementation(libs.google.ai.client.generativeai)
-
-    // Required for coroutines used by the SDK
-    implementation(libs.kotlinx.coroutines.android)
 }

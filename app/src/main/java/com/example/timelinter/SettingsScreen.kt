@@ -309,6 +309,8 @@ fun SettingsScreen(
                                         onValueChange = { 
                                             observeTimerMinutes = it.toInt()
                                             SettingsManager.setObserveTimerMinutes(context, observeTimerMinutes)
+                                            // Also update replenish interval to match observe timer
+                                            SettingsManager.setReplenishIntervalMinutes(context, observeTimerMinutes)
                                         },
                                         valueRange = 1f..30f,
                                         steps = 28,
@@ -355,6 +357,80 @@ fun SettingsScreen(
                             }
                         }
 
+                        // Max Threshold Minutes Setting
+                        Card(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                var maxThresholdMinutes by remember { mutableStateOf(SettingsManager.getMaxThresholdMinutes(context)) }
+                                Text(
+                                    text = "Max Allowed Minutes",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "How much time you can spend in wasteful apps before intervention (bucket size)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text("${maxThresholdMinutes} min")
+                                    Slider(
+                                        value = maxThresholdMinutes.toFloat(),
+                                        onValueChange = {
+                                            maxThresholdMinutes = it.toInt()
+                                            SettingsManager.setMaxThresholdMinutes(context, maxThresholdMinutes)
+                                        },
+                                        valueRange = 1f..60f,
+                                        steps = 59,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Replenish Amount Minutes Setting
+                        Card(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                var replenishAmountMinutes by remember { mutableStateOf(SettingsManager.getReplenishAmountMinutes(context)) }
+                                Text(
+                                    text = "Replenish Amount",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = "How many minutes are restored to your allowance each interval you stay off wasteful apps",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text("${replenishAmountMinutes} min")
+                                    Slider(
+                                        value = replenishAmountMinutes.toFloat(),
+                                        onValueChange = {
+                                            replenishAmountMinutes = it.toInt()
+                                            SettingsManager.setReplenishAmountMinutes(context, replenishAmountMinutes)
+                                        },
+                                        valueRange = 1f..10f,
+                                        steps = 9,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
                         // Information Card
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -371,8 +447,10 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again\n" +
-                                          "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up",
+                                    text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again (also used as the replenish interval)\n" +
+                                          "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up\n" +
+                                          "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)\n" +
+                                          "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
