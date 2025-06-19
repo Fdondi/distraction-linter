@@ -487,10 +487,4 @@ private fun AppListItem(
             modifier = Modifier.weight(1f)
         )
     }
-}
-
-data class AppInfo(
-    val packageName: String,
-    val appName: String,
-    val isSelected: Boolean
-) 
+} 

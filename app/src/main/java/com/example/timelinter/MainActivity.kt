@@ -14,7 +14,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,12 +59,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                var showSettings by remember { mutableStateOf(false) }
+                var showAppsScreen by remember { mutableStateOf(false) }
+                var showTimerScreen by remember { mutableStateOf(false) }
 
-                if (showSettings) {
-                    SettingsScreen(
-                        onNavigateBack = { showSettings = false }
-                    )
+                if (showAppsScreen) {
+                    AppSelectionScreen(onNavigateBack = { showAppsScreen = false })
+                } else if (showTimerScreen) {
+                    TimerSettingsScreen(onNavigateBack = { showTimerScreen = false })
                 } else {
                     TimeLinterApp(
                         isMonitoring = isMonitoringActive,
@@ -85,7 +87,8 @@ class MainActivity : ComponentActivity() {
                             startMonitoringServiceIfPermitted()
                         },
                         onGoToChannelSettings = { openNotificationChannelSettings() },
-                        onOpenSettings = { showSettings = true },
+                        onOpenApps = { showAppsScreen = true },
+                        onOpenTimers = { showTimerScreen = true },
                         userNotes = userNotes,
                         onSaveUserNotes = {
                             ApiKeyManager.saveUserNotes(this, it)
@@ -266,7 +269,8 @@ fun TimeLinterApp(
     showHeadsUpInfoDialog: Boolean,
     onDismissHeadsUpInfoDialog: () -> Unit,
     onGoToChannelSettings: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenApps: () -> Unit,
+    onOpenTimers: () -> Unit,
     userNotes: String,
     onSaveUserNotes: (String) -> Unit
 ) {
@@ -283,8 +287,13 @@ fun TimeLinterApp(
             CenterAlignedTopAppBar(
                 title = { Text(stringResource(id = R.string.app_name)) },
                 actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    // Apps button
+                    IconButton(onClick = onOpenApps) {
+                        Icon(Icons.Default.List, contentDescription = "Manage Apps")
+                    }
+                    // Timer settings button
+                    IconButton(onClick = onOpenTimers) {
+                        Icon(Icons.Default.Timer, contentDescription = "Timer Settings")
                     }
                 }
             )
