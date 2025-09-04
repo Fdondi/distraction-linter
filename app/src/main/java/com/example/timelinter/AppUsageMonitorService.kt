@@ -22,6 +22,7 @@ import java.util.*
 import android.app.usage.UsageStats
 import android.app.PendingIntent
 import androidx.core.app.Person
+import com.example.timelinter.BrowserUrlAccessibilityService
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -209,14 +210,8 @@ class AppUsageMonitorService : Service() {
             Log.d(TAG, "App '${appInfo.readableName}' is currently allowed, skipping")
             return
         }
-        
-        // Check if we should observe (observe_timer)
-        if (!interactionStateManager.shouldObserve()) {
-            Log.v(TAG, "Still within observe timer, waiting...")
-            return
-        }
 
-        // Check threshold bucket
+        // Per interaction.md, trigger ONLY based on threshold being exceeded
         if (bucketRemainingMs.get() > 0) {
             Log.v(TAG, "Threshold not yet exceeded (remaining ${bucketRemainingMs.get()} ms)")
             return
@@ -263,13 +258,16 @@ class AppUsageMonitorService : Service() {
             return
         }
         
+        // From this point we know appInfo is non-null and wasteful
+        val nonNullAppInfo = appInfo!!
+
         // Check for timeout
         if (interactionStateManager.isResponseTimedOut()) {
             Log.i(TAG, "Response timeout - adding '*no response*' and continuing")
             
             // Step 6a: Add "*no response*" to AI conversation (decorated), not UI
             conversationHistoryManager.addNoResponseMessage(
-                currentAppName = appInfo?.readableName ?: "Unknown App",
+                currentAppName = nonNullAppInfo.readableName,
                 sessionTimeMs = sessionWastedTime.get(),
                 dailyTimeMs = dailyWastedTime.get()
             )
@@ -283,7 +281,8 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun generateAIResponse(appInfo: AppInfo?) {
-        val currentModel = aiManager.getInitializedModel() ?: run {
+        val currentModel = aiManager.getInitializedModel()
+        if (currentModel == null) {
             Log.e(TAG, "Cannot generate AI response: Model not initialized")
             return
         }
@@ -435,6 +434,17 @@ class AppUsageMonitorService : Service() {
             
             // If we found a foreground app, return its info
             if (currentForegroundApp != null) {
+                // Check if it is a browser and whether we have a hostname from the accessibility service
+                val browserHost = BrowserUrlAccessibilityService.getCurrentHostname()
+                if (browserHost != null && isBrowserPackage(currentForegroundApp)) {
+                    val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, browserHost)
+                    return AppInfo(
+                        packageName = "web:$browserHost",
+                        readableName = browserHost,
+                        isWasteful = wasteful
+                    )
+                }
+
                 val readableName = getReadableAppName(currentForegroundApp)
                 val isWasteful = isWastefulApp(currentForegroundApp)
                 
@@ -549,7 +559,23 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun isWastefulApp(packageName: String): Boolean {
-        return TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
+        return if (packageName.startsWith("web:")) {
+            val host = packageName.removePrefix("web:")
+            TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
+        } else {
+            TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
+        }
+    }
+
+    private fun isBrowserPackage(pkg: String): Boolean {
+        return pkg in setOf(
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.chrome.dev",
+            "org.mozilla.firefox",
+            "com.sec.android.app.sbrowser",
+            "com.microsoft.emmx"
+        )
     }
 
     private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
