@@ -5,13 +5,11 @@
     <!-- Required for network calls (Gemini API) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- PACKAGE_USAGE_STATS permission removed - only granted to system apps -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <!-- For Android 11+ to query package information -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        android:maxSdkVersion="30" />
+    <!-- QUERY_ALL_PACKAGES permission removed - using <queries> declaration instead -->
 
     <application
         android:allowBackup="true"
@@ -26,7 +24,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.TimeLinter">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -49,12 +46,12 @@
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
             <meta-data
-                android:name="android.accessibilityservice"
+                android:name="android.accessibilityService"
                 android:resource="@xml/accessibility_service_config" />
         </service>
     </application>
 
-    <!-- For Android 12+ -->
+    <!-- For Android 11+ package visibility -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />

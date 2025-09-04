@@ -7,10 +7,10 @@ import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.content
 import java.util.Date
 
-class UserConversationHistory {
+class UserConversationHistory(private val coachName: String = "Adam") {
     private val conversation = mutableListOf<ChatMessage>()
     private val userPerson = Person.Builder().setName("You").setKey("user").build()
-    private val aiPerson = Person.Builder().setName("Time Coach").setKey("ai").setBot(true).build()
+    private val aiPerson = Person.Builder().setName(coachName).setKey("ai").setBot(true).build()
     private val TAG = "UserConvHistoryManager"
 
     fun addUserMessage(messageText: String) {
@@ -169,7 +169,8 @@ class ConversationHistoryManager(
     private val userInteractionTemplate: String
 ) {
     private val TAG = "ConvHistoryManager"
-    private val userConversationHistory = UserConversationHistory()
+    private val coachName = ApiKeyManager.getCoachName(context)
+    private val userConversationHistory = UserConversationHistory(coachName)
     private val apiConversationHistory = APIConversationHistory(
         context, systemPrompt, aiMemoryTemplate, userInfoTemplate, userInteractionTemplate
     )

@@ -99,7 +99,8 @@ class AppUsageMonitorService : Service() {
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
-        aiPerson = Person.Builder().setName("Time Coach").setKey("ai").setBot(true).build()
+        val coachName = ApiKeyManager.getCoachName(this)
+        aiPerson = Person.Builder().setName(coachName).setKey("ai").setBot(true).build()
 
         // Initialize token bucket with maximum threshold
         val maxThresholdMs = TimeUnit.MINUTES.toMillis(

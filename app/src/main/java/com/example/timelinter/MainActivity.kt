@@ -12,9 +12,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private var isMonitoringActive by mutableStateOf(false)
     private var apiKeyPresent by mutableStateOf(false)
     private var userNotes by mutableStateOf("")
+    private var coachName by mutableStateOf("Adam")
 
     // Launcher for Notification Permission
     private val requestNotificationPermissionLauncher = registerForActivityResult(
@@ -56,6 +59,9 @@ class MainActivity : ComponentActivity() {
         apiKeyPresent = ApiKeyManager.hasKey(this)
         // Load user notes
         userNotes = ApiKeyManager.getUserNotes(this)
+        // Load coach name
+        coachName = ApiKeyManager.getCoachName(this)
+        Log.d("MainActivity", "Coach name loaded: $coachName")
 
         setContent {
             MaterialTheme {
@@ -93,6 +99,11 @@ class MainActivity : ComponentActivity() {
                         onSaveUserNotes = {
                             ApiKeyManager.saveUserNotes(this, it)
                             userNotes = it
+                        },
+                        coachName = coachName,
+                        onSaveCoachName = {
+                            ApiKeyManager.saveCoachName(this, it)
+                            coachName = it
                         }
                     )
                 }
@@ -108,6 +119,9 @@ class MainActivity : ComponentActivity() {
         apiKeyPresent = ApiKeyManager.hasKey(this)
         // Re-load user notes on resume
         userNotes = ApiKeyManager.getUserNotes(this)
+        // Re-load coach name on resume
+        coachName = ApiKeyManager.getCoachName(this)
+        Log.d("MainActivity", "Coach name reloaded on resume: $coachName")
         // Re-check permissions if monitoring was supposed to be active
         if (isMonitoringActive && (!hasNotificationPermission() || !hasUsageStatsPermission())) {
             isMonitoringActive = false // Stop monitoring if permission revoked
@@ -246,9 +260,15 @@ class MainActivity : ComponentActivity() {
     // Helper to check if a service is running
     private fun isServiceRunning(serviceClass: Class<*>): Boolean {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        // Since we're targeting API 29+, we can only see our own services
-        return manager.getRunningServices(Integer.MAX_VALUE).any { service ->
-            serviceClass.name == service.service.className && service.foreground
+        // Use the modern approach for checking running services
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            manager.getRunningAppProcesses()?.any { processInfo ->
+                processInfo.processName == packageName && processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+            } ?: false
+        } else {
+            // Fallback for older versions - check if service is bound or running
+            // This is a simplified check since getRunningServices is deprecated
+            false
         }
     }
 }
@@ -272,14 +292,20 @@ fun TimeLinterApp(
     onOpenApps: () -> Unit,
     onOpenTimers: () -> Unit,
     userNotes: String,
-    onSaveUserNotes: (String) -> Unit
+    onSaveUserNotes: (String) -> Unit,
+    coachName: String,
+    onSaveCoachName: (String) -> Unit
 ) {
     var apiKeyInput by rememberSaveable { mutableStateOf("") }
     var userNotesInput by rememberSaveable { mutableStateOf(userNotes) }
+    var coachNameInput by rememberSaveable { mutableStateOf(coachName) }
     
-    // Update local state when userNotes prop changes
+    // Update local state when props change
     LaunchedEffect(userNotes) {
         userNotesInput = userNotes
+    }
+    LaunchedEffect(coachName) {
+        coachNameInput = coachName
     }
 
     Scaffold(
@@ -289,7 +315,7 @@ fun TimeLinterApp(
                 actions = {
                     // Apps button
                     IconButton(onClick = onOpenApps) {
-                        Icon(Icons.Default.List, contentDescription = "Manage Apps")
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Manage Apps")
                     }
                     // Timer settings button
                     IconButton(onClick = onOpenTimers) {
@@ -305,8 +331,37 @@ fun TimeLinterApp(
                 .padding(padding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
+            // --- Coach Name Greeting Section ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Hi I'm ",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                OutlinedTextField(
+                    value = coachNameInput,
+                    onValueChange = { coachNameInput = it },
+                    label = { Text("Name") },
+                    placeholder = { Text("Adam") },
+                    singleLine = true,
+                    modifier = Modifier.width(120.dp)
+                )
+            }
+            if (coachNameInput != coachName && coachNameInput.isNotBlank()) {
+                Button(
+                    onClick = { onSaveCoachName(coachNameInput) },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("Save")
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
             // --- API Key Input Section (Show if key not present) ---
             if (!apiKeyPresent) {
                 Text(

@@ -12,6 +12,7 @@ object ApiKeyManager {
     private const val API_KEY_PREF = "gemini_api_key"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
     private const val USER_NOTES_PREF = "user_notes"
+    private const val COACH_NAME_PREF = "coach_name"
     private const val TAG = "ApiKeyManager"
 
     private fun getEncryptedPreferences(context: Context): SharedPreferences? {
@@ -86,5 +87,26 @@ object ApiKeyManager {
     fun clearUserNotes(context: Context) {
         getEncryptedPreferences(context)?.edit()?.remove(USER_NOTES_PREF)?.apply()
         Log.i(TAG, "User notes cleared.")
+    }
+
+    fun saveCoachName(context: Context, name: String) {
+        getEncryptedPreferences(context)?.edit()?.putString(COACH_NAME_PREF, name)?.apply()
+        Log.i(TAG, "Coach name saved successfully: $name")
+    }
+
+    fun getCoachName(context: Context): String {
+        val name = getEncryptedPreferences(context)?.getString(COACH_NAME_PREF, "Adam") ?: "Adam"
+        Log.d(TAG, "Coach name loaded: $name")
+        return name
+    }
+
+    fun hasCoachName(context: Context): Boolean {
+        val name = getEncryptedPreferences(context)?.getString(COACH_NAME_PREF, null)
+        return !name.isNullOrEmpty()
+    }
+
+    fun clearCoachName(context: Context) {
+        getEncryptedPreferences(context)?.edit()?.remove(COACH_NAME_PREF)?.apply()
+        Log.i(TAG, "Coach name cleared.")
     }
 } 
