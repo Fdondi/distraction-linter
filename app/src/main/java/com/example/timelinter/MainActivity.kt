@@ -12,8 +12,9 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-// import androidx.compose.foundation.shape.RoundedCornerShape // Not used after removing Box with border
+import androidx.compose.foundation.shape.RoundedCornerShape // Added for the status box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Timer
@@ -22,21 +23,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color // Added for text color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
-
-// Removed Desktop-specific or BasicTextField-specific imports:
-// import androidx.compose.foundation.text.BasicTextField
-// import androidx.compose.foundation.rememberScrollState
-// import androidx.compose.foundation.verticalScroll
-// import androidx.compose.foundation.VerticalScrollbar
-// import androidx.compose.foundation.rememberScrollbarAdapter
-// import androidx.compose.foundation.border
-// import androidx.compose.material3.LocalTextStyle
 
 class MainActivity : ComponentActivity() {
 
@@ -388,6 +381,47 @@ fun TimeLinterApp(
                 Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
             }
 
+            // --- Status recap section ---
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val statusText: String
+            val backgroundColor: Color
+            val textColor: Color
+
+            when {
+                !apiKeyPresent -> {
+                    statusText = "Please enter your API Key above."
+                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                isMonitoring -> {
+                    statusText = "Monitoring active..."
+                    backgroundColor = MaterialTheme.colorScheme.primaryContainer
+                    textColor = MaterialTheme.colorScheme.onPrimaryContainer
+                }
+                else -> {
+                    statusText = "Monitoring stopped."
+                    backgroundColor = MaterialTheme.colorScheme.errorContainer
+                    textColor = MaterialTheme.colorScheme.onErrorContainer
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(backgroundColor, shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = textColor
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            
             // --- User Notes Section ---
             Text(
                 text = "Personal Notes for AI",
@@ -413,21 +447,13 @@ fun TimeLinterApp(
 
             Button(
                 onClick = onToggleMonitoring,
-                enabled = apiKeyPresent
+                enabled = apiKeyPresent,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isMonitoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
             ) {
                 Text(if (isMonitoring) "Stop Monitoring" else "Start Monitoring")
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = when {
-                    !apiKeyPresent -> "Please enter your API Key above."
-                    isMonitoring -> "Monitoring active..."
-                    else -> "Monitoring stopped."
-                },
-                style = MaterialTheme.typography.bodyLarge
-            )
 
             // Dialog for Usage Access Permission
             if (showUsageAccessDialog) {
