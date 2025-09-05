@@ -5,9 +5,11 @@ import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.util.Linkify
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
 
@@ -360,23 +363,62 @@ fun TimeLinterApp(
 
             // --- API Key Input Section (Show if key not present) ---
             if (!apiKeyPresent) {
-                Text(
-                    text = "Gemini API Key Required",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                OutlinedTextField(
-                    value = apiKeyInput,
-                    onValueChange = { apiKeyInput = it },
-                    label = { Text("Enter API Key") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(), // Hide the key
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Button(
-                    onClick = { onSaveApiKey(apiKeyInput) },
-                    enabled = apiKeyInput.isNotBlank() // Enable only if text is entered
+                val backgroundColor = MaterialTheme.colorScheme.errorContainer;
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(backgroundColor, shape = RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Save API Key")
+                    val context = LocalContext.current
+
+                    Card(
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Gemini API Key Required",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+
+                            Button(onClick = {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    "https://aistudio.google.com/apikey".toUri()
+                                )
+                                context.startActivity(intent)
+                            }) {
+                                Text("Get API Key")
+                            }
+
+                            OutlinedTextField(
+                                value = apiKeyInput,
+                                onValueChange = { apiKeyInput = it },
+                                label = { Text("Enter API Key") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Button(
+                                onClick = { onSaveApiKey(apiKeyInput) },
+                                enabled = apiKeyInput.isNotBlank()
+                            ) {
+                                Text("Save API Key")
+                            }
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(32.dp)) // Add space after key section
             }
