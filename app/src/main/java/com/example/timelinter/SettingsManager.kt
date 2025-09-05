@@ -17,6 +17,7 @@ object SettingsManager {
     private const val REPLENISH_INTERVAL_MINUTES_KEY = "replenish_interval_minutes" // How often (in minutes) to replenish
     private const val REPLENISH_AMOUNT_MINUTES_KEY = "replenish_amount_minutes"      // How many minutes to replenish each interval
     private const val THRESHOLD_REMAINING_MS_KEY = "threshold_remaining_ms"           // Internal token bucket storage (ms)
+    private const val ACCUMULATED_NON_WASTEFUL_MS_KEY = "accumulated_non_wasteful_ms" // Internal accumulator for replenishment
 
     // Defaults
     private const val DEFAULT_MAX_THRESHOLD_MINUTES = 5
@@ -78,4 +79,14 @@ object SettingsManager {
     fun setThresholdRemainingMs(context: Context, value: Long) {
         getPreferences(context).edit().putLong(THRESHOLD_REMAINING_MS_KEY, value).apply()
     }
-} 
+
+    /* ================= Accumulated Non-Wasteful Time (persistence) ================ */
+
+    fun getAccumulatedNonWastefulMs(context: Context, defaultValue: Long): Long {
+        return getPreferences(context).getLong(ACCUMULATED_NON_WASTEFUL_MS_KEY, defaultValue)
+    }
+
+    fun setAccumulatedNonWastefulMs(context: Context, value: Long) {
+        getPreferences(context).edit().putLong(ACCUMULATED_NON_WASTEFUL_MS_KEY, value).apply()
+    }
+}
