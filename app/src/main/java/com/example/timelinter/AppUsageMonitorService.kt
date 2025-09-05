@@ -80,7 +80,7 @@ class AppUsageMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
-        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
         
         // Initialize InteractionStateManager
@@ -391,7 +391,7 @@ class AppUsageMonitorService : Service() {
     )
 
     private fun getCurrentAppUsage(): AppInfo? {
-        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
         // Look back further to get more reliable events
         val beginTime = endTime - 1000 * 60 * 2 // 2 minutes
@@ -399,7 +399,7 @@ class AppUsageMonitorService : Service() {
         try {
             // Check if user is unlocked (required for Android R+)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                val userManager = getSystemService(Context.USER_SERVICE) as android.os.UserManager
+                val userManager = getSystemService(USER_SERVICE) as UserManager
                 if (!userManager.isUserUnlocked) {
                     Log.w(TAG, "User is locked, cannot query usage events")
                     return null
@@ -638,7 +638,7 @@ class AppUsageMonitorService : Service() {
         } else {
             "No distracting app active"
         }
-        val maxThresholdMs = java.util.concurrent.TimeUnit.MINUTES.toMillis(
+        val maxThresholdMs = TimeUnit.MINUTES.toMillis(
             SettingsManager.getMaxThresholdMinutes(this).toLong()
         )
         val bucketRemaining = bucketRemainingMs.get()

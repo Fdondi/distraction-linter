@@ -12,9 +12,8 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+// import androidx.compose.foundation.shape.RoundedCornerShape // Not used after removing Box with border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Timer
@@ -28,6 +27,16 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
+
+// Removed Desktop-specific or BasicTextField-specific imports:
+// import androidx.compose.foundation.text.BasicTextField
+// import androidx.compose.foundation.rememberScrollState
+// import androidx.compose.foundation.verticalScroll
+// import androidx.compose.foundation.VerticalScrollbar
+// import androidx.compose.foundation.rememberScrollbarAdapter
+// import androidx.compose.foundation.border
+// import androidx.compose.material3.LocalTextStyle
 
 class MainActivity : ComponentActivity() {
 
@@ -261,15 +270,9 @@ class MainActivity : ComponentActivity() {
     private fun isServiceRunning(serviceClass: Class<*>): Boolean {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         // Use the modern approach for checking running services
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            manager.getRunningAppProcesses()?.any { processInfo ->
-                processInfo.processName == packageName && processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
-            } ?: false
-        } else {
-            // Fallback for older versions - check if service is bound or running
-            // This is a simplified check since getRunningServices is deprecated
-            false
-        }
+        return manager.runningAppProcesses?.any { processInfo ->
+            processInfo.processName == packageName && processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+        } ?: false
     }
 }
 
@@ -390,14 +393,15 @@ fun TimeLinterApp(
                 text = "Personal Notes for AI",
                 style = MaterialTheme.typography.titleMedium
             )
-            OutlinedTextField(
+            ScrollableTextFieldWithScrollbar (
                 value = userNotesInput,
                 onValueChange = { userNotesInput = it },
-                label = { Text("Add context or goals for the AI...") },
-                placeholder = { Text("e.g., I'm trying to focus on work, help me stay productive") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-                maxLines = 4
+                label = "Add context or goals for the AI..." ,
+                // placeholder = { Text("e.g., I'm trying to focus on work, help me stay productive") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f), // Make it expand
+                // minLines = 8 // Increase default size, allows it to grow beyond this too
             )
             Button(
                 onClick = { onSaveUserNotes(userNotesInput) },
