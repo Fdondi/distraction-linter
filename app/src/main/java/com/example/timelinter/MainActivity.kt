@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape // Added for the status box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -72,11 +73,14 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 var showAppsScreen by remember { mutableStateOf(false) }
                 var showTimerScreen by remember { mutableStateOf(false) }
+                var showLogScreen by remember { mutableStateOf(false) }
 
                 if (showAppsScreen) {
                     AppSelectionScreen(onNavigateBack = { showAppsScreen = false })
                 } else if (showTimerScreen) {
                     TimerSettingsScreen(onNavigateBack = { showTimerScreen = false })
+                } else if (showLogScreen) {
+                    AILogScreen(onNavigateBack = { showLogScreen = false })
                 } else {
                     TimeLinterApp(
                         isMonitoring = isMonitoringActive,
@@ -100,6 +104,7 @@ class MainActivity : ComponentActivity() {
                         onGoToChannelSettings = { openNotificationChannelSettings() },
                         onOpenApps = { showAppsScreen = true },
                         onOpenTimers = { showTimerScreen = true },
+                        onOpenLog = { showLogScreen = true },
                         userNotes = userNotes,
                         onSaveUserNotes = {
                             ApiKeyManager.saveUserNotes(this, it)
@@ -290,6 +295,7 @@ fun TimeLinterApp(
     onGoToChannelSettings: () -> Unit,
     onOpenApps: () -> Unit,
     onOpenTimers: () -> Unit,
+    onOpenLog: () -> Unit,
     userNotes: String,
     onSaveUserNotes: (String) -> Unit,
     coachName: String,
@@ -319,6 +325,10 @@ fun TimeLinterApp(
                     // Timer settings button
                     IconButton(onClick = onOpenTimers) {
                         Icon(Icons.Default.Timer, contentDescription = "Timer Settings")
+                    }
+                    // AI Log button
+                    IconButton(onClick = onOpenLog) {
+                        Icon(Icons.Default.History, contentDescription = "AI Log")
                     }
                 }
             )

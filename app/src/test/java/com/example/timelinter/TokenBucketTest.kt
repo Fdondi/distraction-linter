@@ -109,3 +109,4 @@ class TokenBucketTest {
         assertEquals("Accumulated after 100m more", TimeUnit.MINUTES.toMillis(5), accumulatedMs)
     }
 }
+

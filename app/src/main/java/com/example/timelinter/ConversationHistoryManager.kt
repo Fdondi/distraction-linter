@@ -174,16 +174,26 @@ class ConversationHistoryManager(
     private val apiConversationHistory = APIConversationHistory(
         context, systemPrompt, aiMemoryTemplate, userInfoTemplate, userInteractionTemplate
     )
+    
+    // Track how many messages we've published to avoid duplication
+    private var publishedMessageCount = 0
 
     init {
         Log.d(TAG, "ConversationHistoryManager initialized with systemPrompt: ${systemPrompt.take(200)}...")
+        publishApiHistory()
     }
 
     fun startNewSession(appName: String, sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
         Log.i(TAG, "Starting new session for $appName")
         
-        // Clear both histories
+        // Clear user-visible history (this resets for each session)
         userConversationHistory.clear()
+        
+        // Add separator to persistent log
+        ConversationLogStore.addSessionSeparator(appName)
+        
+        // Reset published count for new session
+        publishedMessageCount = 0
         
         // Initialize API conversation with the 3-step process from interaction.md
         apiConversationHistory.initializeConversation(appName, sessionTimeMs, dailyTimeMs)
@@ -192,23 +202,27 @@ class ConversationHistoryManager(
         // as per interaction.md: "This initial conversation will be added to the AI history 
         // and sent every time, but NOT added to the UI visible conversation."
         
+        publishApiHistory()
         logHistoriesState("After startNewSession for $appName")
     }
 
     fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         userConversationHistory.addUserMessage(messageText)
         apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
+        publishApiHistory()
     }
 
     fun addAIMessage(messageText: String) {
         userConversationHistory.addAIMessage(messageText)
         apiConversationHistory.addAIMessage(messageText)
+        publishApiHistory()
     }
 
     fun addNoResponseMessage(currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         // Add "*no response*" to AI conversation only (decorated), not to UI
         apiConversationHistory.addUserMessage("*no response*", currentAppName, sessionTimeMs, dailyTimeMs)
         Log.d(TAG, "Added '*no response*' to API history only")
+        publishApiHistory()
     }
 
     fun getHistoryForAPI(): List<Content> = apiConversationHistory.getHistory()
@@ -219,6 +233,7 @@ class ConversationHistoryManager(
         userConversationHistory.clear()
         apiConversationHistory.clear()
         Log.d(TAG, "Cleared all conversation histories")
+        publishApiHistory()
     }
 
     private fun logHistoriesState(context: String) {
@@ -228,5 +243,16 @@ class ConversationHistoryManager(
         userConversationHistory.logHistory()
         apiConversationHistory.logHistory()
         Log.d(TAG, "=== End $context ===")
+    }
+
+    private fun publishApiHistory() {
+        // Only publish new messages since last publish to avoid duplication
+        val currentHistory = apiConversationHistory.getHistory()
+        val newMessages = currentHistory.drop(publishedMessageCount)
+        
+        if (newMessages.isNotEmpty()) {
+            ConversationLogStore.appendToHistory(newMessages)
+            publishedMessageCount = currentHistory.size
+        }
     }
 } 
