@@ -109,7 +109,7 @@ class AppUsageMonitorService : Service() {
         )
         val persistedRemaining = SettingsManager.getThresholdRemainingMs(this, maxThresholdMs)
         val initialRemaining = if (persistedRemaining <= 0L) {
-            Log.i(TAG, "Persisted bucket was empty or missing. Resetting to max: ${'$'}{maxThresholdMs} ms")
+            Log.i(TAG, "Persisted bucket was empty or missing. Resetting to max: ${maxThresholdMs} ms")
             SettingsManager.setThresholdRemainingMs(this, maxThresholdMs)
             maxThresholdMs
         } else {
@@ -133,7 +133,7 @@ class AppUsageMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand received action: ${'$'}{intent?.action}")
+        Log.d(TAG, "onStartCommand received action: ${intent?.action}")
         
         when (intent?.action) {
             ACTION_HANDLE_REPLY -> {
@@ -196,7 +196,7 @@ class AppUsageMonitorService : Service() {
         updateTimeTracking(currentAppInfo)
         
         val currentState = interactionStateManager.getCurrentState()
-        Log.v(TAG, "Main loop: State=$currentState, App=${'$'}{currentAppInfo?.packageName}, Wasteful=${'$'}{currentAppInfo?.isWasteful}")
+        Log.v(TAG, "Main loop: State=$currentState, App=${currentAppInfo?.packageName}, Wasteful=${currentAppInfo?.isWasteful}")
         
         when (currentState) {
             InteractionState.OBSERVING -> {
@@ -222,7 +222,7 @@ class AppUsageMonitorService : Service() {
         }
 
         // Threshold exceeded - start conversation
-        Log.i(TAG, "Threshold exceeded for ${'$'}{appInfo?.readableName ?: 'Unknown'}, starting conversation (bucket empty)")
+        Log.i(TAG, "Threshold exceeded for ${appInfo?.readableName ?: "Unknown"}, starting conversation (bucket empty)")
         
         // Step 1b: Create initial AI history and start conversation
         conversationHistoryManager.startNewSession(
