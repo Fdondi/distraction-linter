@@ -335,10 +335,10 @@ class AppUsageMonitorService : Service() {
                     
                     // Step 5a/5b: Check if conversation should reset or continue
                     if (shouldResetConversation || parsedResponse.userMessage.isEmpty()) {
-                        // Step 5a: ALLOW tool used or no non-tool message -> reset
-                        Log.d(TAG, "Resetting conversation (ALLOW used or no message)")
+                        // Step 5a: ALLOW tool used or no non-tool message -> archive and reset
+                        Log.d(TAG, "Resetting conversation (ALLOW used or no message) - archiving first")
+                        tryArchiveMemoriesThenClear(appInfo)
                         interactionStateManager.resetToObserving()
-                        conversationHistoryManager.clearHistories()
                     } else {
                         // Step 5b: Continue conversation, wait for response
                         Log.d(TAG, "Continuing conversation, waiting for user response")
@@ -469,16 +469,6 @@ class AppUsageMonitorService : Service() {
     private fun updateTimeTracking(appInfo: AppInfo?) {
         val detectedApp = appInfo?.packageName ?: ""
         val isCurrentlyWasteful = appInfo?.isWasteful == true
-        
-        // Clear history on transition from wasteful to non-wasteful
-        if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
-            Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Archiving conversation and clearing history.")
-
-            // Ask the model for anything worth remembering before clearing
-            tryArchiveMemoriesThenClear(appInfo)
-
-            interactionStateManager.resetToObserving()
-        }
 
         // ---------------- Token bucket update ----------------
         val now = System.currentTimeMillis()

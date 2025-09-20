@@ -65,6 +65,7 @@ class APIConversationHistory(
 
     fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         val contextualizedUserMessage = userInteractionTemplate
+            .replace("{{CURRENT_TIME_AND_DATE}}", Date().toString())
             .replace("{{APP_NAME}}", currentAppName)
             .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
             .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
