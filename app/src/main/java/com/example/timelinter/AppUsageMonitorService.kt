@@ -242,7 +242,6 @@ class AppUsageMonitorService : Service() {
         if (appInfo?.isWasteful != true) {
             Log.i(TAG, "User moved away from wasteful apps, resetting to observing")
             interactionStateManager.resetToObserving()
-            conversationHistoryManager.clearHistories()
             return
         }
         
@@ -258,7 +257,6 @@ class AppUsageMonitorService : Service() {
         if (appInfo?.isWasteful != true) {
             Log.i(TAG, "User moved away from wasteful apps during response wait, resetting")
             interactionStateManager.resetToObserving()
-            conversationHistoryManager.clearHistories()
             return
         }
         
@@ -474,8 +472,11 @@ class AppUsageMonitorService : Service() {
         
         // Clear history on transition from wasteful to non-wasteful
         if (wasPreviouslyWasteful && !isCurrentlyWasteful) {
-            Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Clearing conversation history.")
-            conversationHistoryManager.clearHistories()
+            Log.i(TAG, "Transition from wasteful to non-wasteful app detected. Archiving conversation and clearing history.")
+
+            // Ask the model for anything worth remembering before clearing
+            tryArchiveMemoriesThenClear(appInfo)
+
             interactionStateManager.resetToObserving()
         }
 
@@ -499,7 +500,8 @@ class AppUsageMonitorService : Service() {
         )
 
         // Update state from result
-        if (updateResult.newRemainingMs != bucketRemainingMs.get()) {
+        val oldRemaining = bucketRemainingMs.get()
+        if (updateResult.newRemainingMs != oldRemaining) {
             bucketRemainingMs.set(updateResult.newRemainingMs)
         }
         if (updateResult.newAccumulatedNonWastefulMs != bucketAccumulatedNonWastefulMs.get()) {
@@ -511,6 +513,15 @@ class AppUsageMonitorService : Service() {
         if ((now - previousUpdate) >= TimeUnit.MINUTES.toMillis(1)) {
             SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
             SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get()) // Persist accumulator
+        }
+
+        // If bucket just transitioned from empty (<=0) to full (== max), archive & clear
+        val maxThresholdMs = config.maxThresholdMs
+        val becameFull = oldRemaining <= 0L && updateResult.newRemainingMs >= maxThresholdMs
+        if (becameFull && isCurrentlyWasteful) {
+            Log.i(TAG, "Token bucket refilled to full while wasteful: archiving and clearing conversation.")
+            tryArchiveMemoriesThenClear(appInfo)
+            interactionStateManager.resetToObserving()
         }
 
         // ---------------- Existing time tracking logic ----------------
@@ -552,6 +563,40 @@ class AppUsageMonitorService : Service() {
          }
          
         wasPreviouslyWasteful = isCurrentlyWasteful
+    }
+
+    private fun tryArchiveMemoriesThenClear(appInfo: AppInfo?) {
+        val currentModel = aiManager.getInitializedModel()
+        if (currentModel == null) {
+            Log.w(TAG, "Model not initialized; clearing histories without archive prompt")
+            conversationHistoryManager.clearHistories()
+            return
+        }
+
+        val appName = appInfo?.readableName ?: "Unknown App"
+        // Add API-only user message asking for memory suggestions
+        val prompt = "This conversation is to be archived. Is there anything worth remembering that wasn't already in the AI memory at the beginning of this conversation? Respond with concise bullet points or 'No new memory'."
+        conversationHistoryManager.addApiOnlyUserMessage(
+            messageText = prompt,
+            currentAppName = appName,
+            sessionTimeMs = sessionWastedTime.get(),
+            dailyTimeMs = dailyWastedTime.get()
+        )
+
+        // Build contents for a one-off generation using the updated API history
+        val contents = conversationHistoryManager.getHistoryForAPI()
+        aiManager.generateFromContents(contents) { responseText ->
+            if (!responseText.isNullOrBlank()) {
+                val trimmed = responseText.trim()
+                if (!trimmed.equals("No new memory", ignoreCase = true)) {
+                    AIMemoryManager.addPermanentMemory(this, trimmed)
+                    // Update memory shown in log screen
+                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
+                }
+            }
+            // Finally clear histories for a new session
+            conversationHistoryManager.clearHistories()
+        }
     }
 
     private fun isWastefulApp(packageName: String): Boolean {

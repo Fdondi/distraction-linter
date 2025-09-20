@@ -181,6 +181,8 @@ class ConversationHistoryManager(
     init {
         Log.d(TAG, "ConversationHistoryManager initialized with systemPrompt: ${systemPrompt.take(200)}...")
         publishApiHistory()
+        // Publish current memory to the log store for UI
+        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
     fun startNewSession(appName: String, sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
@@ -204,12 +206,22 @@ class ConversationHistoryManager(
         
         publishApiHistory()
         logHistoriesState("After startNewSession for $appName")
+        // Update memory shown in UI (in case it changed)
+        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
     fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         userConversationHistory.addUserMessage(messageText)
         apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
         publishApiHistory()
+        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
+    }
+
+    // Adds a user message ONLY to API history (not shown in user-visible chat)
+    fun addApiOnlyUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+        apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
+        publishApiHistory()
+        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
     fun addAIMessage(messageText: String) {
@@ -234,6 +246,7 @@ class ConversationHistoryManager(
         apiConversationHistory.clear()
         Log.d(TAG, "Cleared all conversation histories")
         publishApiHistory()
+        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
     private fun logHistoriesState(context: String) {

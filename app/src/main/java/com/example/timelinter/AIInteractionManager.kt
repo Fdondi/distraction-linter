@@ -61,6 +61,26 @@ class AIInteractionManager(
         return generativeModel
     }
 
+    // Generate a response from explicitly provided contents (bypasses pulling from history)
+    fun generateFromContents(
+        contents: List<com.google.ai.client.generativeai.type.Content>,
+        onResponse: (String) -> Unit
+    ) {
+        val currentModel = getInitializedModel() ?: run {
+            onResponse("(Error: AI not initialized - Model unavailable)")
+            return
+        }
+        serviceScope.launch {
+            try {
+                val response = currentModel.generateContent(*contents.toTypedArray())
+                onResponse(response.text ?: "")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error calling Gemini API (custom contents)", e)
+                onResponse("")
+            }
+        }
+    }
+
     fun generateSubsequentResponse(
         appName: String,
         sessionTimeMs: Long,

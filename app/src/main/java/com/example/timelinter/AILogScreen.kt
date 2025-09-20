@@ -19,6 +19,7 @@ fun AILogScreen(
     onNavigateBack: () -> Unit
 ) {
     val history by ConversationLogStore.apiHistory.collectAsState()
+    val aiMemory by ConversationLogStore.aiMemory.collectAsState()
 
     Scaffold(
         topBar = {
@@ -38,6 +39,22 @@ fun AILogScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
+            Text(
+                text = "AI Memory",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                Text(
+                    text = if (aiMemory.isBlank()) "(No AI memory yet)" else aiMemory,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
             if (history.isEmpty()) {
                 Text(
                     text = "No AI conversation yet.",
