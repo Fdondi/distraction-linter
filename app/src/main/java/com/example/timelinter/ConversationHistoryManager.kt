@@ -80,6 +80,12 @@ class APIConversationHistory(
         logHistory()
     }
 
+    // Adds a model-side note to the API history only (not visible in user UI)
+    fun addModelNote(note: String) {
+        conversation.add(content(role = "model") { text("[TOOL] $note") })
+        logHistory()
+    }
+
     fun addSystemMessage(messageText: String) {
         conversation.add(content(role = "user") { text(messageText) })
         logHistory()
@@ -228,6 +234,16 @@ class ConversationHistoryManager(
     fun addAIMessage(messageText: String) {
         userConversationHistory.addAIMessage(messageText)
         apiConversationHistory.addAIMessage(messageText)
+        publishApiHistory()
+    }
+
+    // Log tool usage to API history only (hidden from user-visible chat)
+    fun addToolLog(tool: ToolCommand) {
+        val note = when (tool) {
+            is ToolCommand.Allow -> "ALLOW ${tool.minutes}${tool.app?.let { " min for '" + it + "'" } ?: " min"}"
+            is ToolCommand.Remember -> "REMEMBER ${tool.durationMinutes?.let { "$it min" } ?: "FOREVER"}: ${tool.content}"
+        }
+        apiConversationHistory.addModelNote(note)
         publishApiHistory()
     }
 

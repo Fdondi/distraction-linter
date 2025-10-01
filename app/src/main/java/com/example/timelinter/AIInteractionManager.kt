@@ -38,11 +38,11 @@ class AIInteractionManager(
         if (apiKey != null) {
             try {
                 generativeModel = GenerativeModel(
-                    modelName = "gemini-1.5-flash-latest",
+                    modelName = "gemini-2.5-flash",
                     apiKey = apiKey
                     // Add safetySettings and generationConfig if needed
                 )
-                Log.i(TAG, "GenerativeModel initialized successfully with model gemini-1.5-flash-latest.")
+                Log.i(TAG, "GenerativeModel initialized successfully with model gemini-2.5-flash.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing GenerativeModel", e)
                 // Consider how to handle this error - e.g., notify user, disable AI features

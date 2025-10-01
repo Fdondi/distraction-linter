@@ -6,16 +6,19 @@ import android.app.Service
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.os.Build
+import android.os.PowerManager
 import android.os.IBinder
 import android.os.UserManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
-import com.google.ai.client.generativeai.type.Content
 import kotlinx.coroutines.*
 
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.*
@@ -23,6 +26,10 @@ import android.app.usage.UsageStats
 import android.app.PendingIntent
 import androidx.core.app.Person
 import com.example.timelinter.BrowserUrlAccessibilityService
+import android.app.KeyguardManager
+import android.content.pm.PackageManager
+import android.content.Intent.ACTION_MAIN
+import android.content.Intent.CATEGORY_HOME
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -69,6 +76,9 @@ class AppUsageMonitorService : Service() {
 
     // Monitoring state
     @Volatile private var isMonitoringScheduled = false
+    private var mainLoopFuture: ScheduledFuture<*>? = null
+    private var statsFuture: ScheduledFuture<*>? = null
+    private var screenStateReceiver: BroadcastReceiver? = null
 
     // Persons for MessagingStyle
     private lateinit var userPerson: Person
@@ -130,6 +140,9 @@ class AppUsageMonitorService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Error calling startForeground", e)
         }
+
+        // Register screen/lock state receiver
+        registerScreenStateReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -156,7 +169,7 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
         try {
             // Schedule the main interaction loop
-            executor.scheduleAtFixedRate({
+            mainLoopFuture = executor.scheduleAtFixedRate({
                 try {
                     Log.v(TAG, "Scheduled task running: mainInteractionLoop")
                     mainInteractionLoop()
@@ -166,7 +179,7 @@ class AppUsageMonitorService : Service() {
             }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
 
             // Schedule stats notification update less frequently
-             executor.scheduleAtFixedRate({
+             statsFuture = executor.scheduleAtFixedRate({
                  try {
                     Log.d(TAG, "Scheduled task running: updateStatsNotification")
                     updateStatsNotification()
@@ -184,6 +197,58 @@ class AppUsageMonitorService : Service() {
         }
     }
 
+    private fun stopMonitoringTasks(reason: String) {
+        try {
+            mainLoopFuture?.cancel(false)
+            statsFuture?.cancel(false)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cancelling scheduled tasks", e)
+        } finally {
+            mainLoopFuture = null
+            statsFuture = null
+            isMonitoringScheduled = false
+            Log.i(TAG, "Monitoring tasks stopped (${reason}).")
+        }
+    }
+
+    private fun registerScreenStateReceiver() {
+        if (screenStateReceiver != null) return
+        screenStateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action
+                when (action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        Log.i(TAG, "Screen turned off; stopping monitoring tasks")
+                        if (isMonitoringScheduled) stopMonitoringTasks("screen off")
+                    }
+                    Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_UNLOCKED -> {
+                        // Only resume if truly unlocked and interactive
+                        if (!isDeviceLockedOrScreenOff()) {
+                            Log.i(TAG, "User present/screen on; attempting to start monitoring")
+                            startMonitoring()
+                        } else {
+                            Log.v(TAG, "Received ${action} but device still locked or screen off; not starting")
+                        }
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                addAction(Intent.ACTION_USER_UNLOCKED)
+            }
+        }
+        try {
+            registerReceiver(screenStateReceiver, filter)
+            Log.d(TAG, "Screen state receiver registered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering screen state receiver", e)
+        }
+    }
+
     /**
      * Main interaction loop implementing the flow from interaction.md
      */
@@ -192,21 +257,32 @@ class AppUsageMonitorService : Service() {
         interactionStateManager.cleanupExpiredAllows()
         
         // Get current app usage
-        val currentAppInfo = getCurrentAppUsage()
-        updateTimeTracking(currentAppInfo)
+        val detectedInfo = getCurrentAppUsage()
+        // Probabilistic fallback: if detection is empty, 75% chance keep previous app, 25% clear it
+        // This handles transient empty detections while eventually clearing truly idle states
+        val effectiveInfo = detectedInfo ?: run {
+            if (Random().nextInt(4) == 0) {
+                // 1 in 4 chance: clear the app
+                null
+            } else {
+                // 3 in 4 chance: keep previous app
+                getAppInfoFromCurrentApp()
+            }
+        }
+        updateTimeTracking(effectiveInfo)
         
         val currentState = interactionStateManager.getCurrentState()
-        Log.v(TAG, "Main loop: State=$currentState, App=${currentAppInfo?.packageName}, Wasteful=${currentAppInfo?.isWasteful}")
+        Log.v(TAG, "Main loop: State=$currentState, App=${effectiveInfo?.packageName}, Wasteful=${effectiveInfo?.isWasteful}")
         
         when (currentState) {
             InteractionState.OBSERVING -> {
-                handleObservingState(currentAppInfo)
+                handleObservingState(effectiveInfo)
             }
             InteractionState.CONVERSATION_ACTIVE -> {
-                handleConversationActiveState(currentAppInfo)
+                handleConversationActiveState(effectiveInfo)
             }
             InteractionState.WAITING_FOR_RESPONSE -> {
-                handleWaitingForResponseState(currentAppInfo)
+                handleWaitingForResponseState(effectiveInfo)
             }
         }
     }
@@ -295,58 +371,55 @@ class AppUsageMonitorService : Service() {
                 Log.d(TAG, "Sending to AI. History size: ${apiContents.size}")
 
                 val response = currentModel.generateContent(*apiContents.toTypedArray())
-                val rawResponse = response.text
-                
-                if (rawResponse != null) {
-                    Log.d(TAG, "Raw AI Response: $rawResponse")
-                    
-                    // Step 3: Parse response and run tools
-                    val parsedResponse = ToolParser.parseAIResponse(rawResponse)
-                    
-                    // Process tools
-                    var shouldResetConversation = false
-                    for (tool in parsedResponse.tools) {
-                        when (tool) {
-                            is ToolCommand.Allow -> {
-                                Log.i(TAG, "Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
-                                interactionStateManager.applyAllowCommand(tool)
-                                shouldResetConversation = true
+                // Function-calling only: parse structured calls and model text
+                val parsedResponse = GeminiFunctionCallParser.parse(response)
+                // Process tools
+                var shouldResetConversation = false
+                for (tool in parsedResponse.tools) {
+                    when (tool) {
+                        is ToolCommand.Allow -> {
+                            Log.i(TAG, "Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
+                            interactionStateManager.applyAllowCommand(tool)
+                            // Log tool usage to API history only
+                            conversationHistoryManager.addToolLog(tool)
+                            shouldResetConversation = true
+                        }
+                        is ToolCommand.Remember -> {
+                            Log.i(TAG, "Processing REMEMBER tool: ${tool.content}")
+                            val tmp: Int? = tool.durationMinutes
+                            if (tmp != null) {
+                                AIMemoryManager.addTemporaryMemory(this@AppUsageMonitorService, tool.content, tmp)
+                            } else {
+                                AIMemoryManager.addPermanentMemory(this@AppUsageMonitorService, tool.content)
                             }
-                            is ToolCommand.Remember -> {
-                                Log.i(TAG, "Processing REMEMBER tool: ${tool.content}")
-                                if (tool.durationMinutes != null) {
-                                    AIMemoryManager.addTemporaryMemory(this@AppUsageMonitorService, tool.content, tool.durationMinutes)
-                                } else {
-                                    AIMemoryManager.addPermanentMemory(this@AppUsageMonitorService, tool.content)
-                                }
-                            }
+                            // Log tool usage to API history only
+                            conversationHistoryManager.addToolLog(tool)
+                            // Update memory in UI store immediately
+                            ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this@AppUsageMonitorService))
                         }
                     }
-                    
-                    // Step 4: If there was any non-tool answer, display to user
-                    if (parsedResponse.userMessage.isNotEmpty()) {
-                        conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
-                        showConversationNotification(
-                            appName = appInfo?.readableName ?: "Unknown App",
-                            sessionTimeMs = sessionWastedTime.get(),
-                            dailyTimeMs = dailyWastedTime.get()
-                        )
-                    }
-                    
-                    // Step 5a/5b: Check if conversation should reset or continue
-                    if (shouldResetConversation || parsedResponse.userMessage.isEmpty()) {
-                        // Step 5a: ALLOW tool used or no non-tool message -> archive and reset
-                        Log.d(TAG, "Resetting conversation (ALLOW used or no message) - archiving first")
-                        tryArchiveMemoriesThenClear(appInfo)
-                        interactionStateManager.resetToObserving()
-                    } else {
-                        // Step 5b: Continue conversation, wait for response
-                        Log.d(TAG, "Continuing conversation, waiting for user response")
-                        interactionStateManager.startWaitingForResponse()
-                    }
-                    
+                }
+
+                // Step 4: If there was any non-tool answer, display to user
+                if (parsedResponse.userMessage.isNotEmpty()) {
+                    conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
+                    showConversationNotification(
+                        appName = appInfo?.readableName ?: "Unknown App",
+                        sessionTimeMs = sessionWastedTime.get(),
+                        dailyTimeMs = dailyWastedTime.get()
+                    )
+                }
+
+                // Step 5a/5b: Check if conversation should reset or continue
+                if (shouldResetConversation || parsedResponse.userMessage.isEmpty()) {
+                    // Step 5a: ALLOW tool used or no non-tool message -> archive and reset
+                    Log.d(TAG, "Resetting conversation (ALLOW used or no message) - archiving first")
+                    tryArchiveMemoriesThenClear(appInfo)
+                    interactionStateManager.resetToObserving()
                 } else {
-                    Log.w(TAG, "AI response was null")
+                    // Step 5b: Continue conversation, wait for response
+                    Log.d(TAG, "Continuing conversation, waiting for user response")
+                    interactionStateManager.startWaitingForResponse()
                 }
                 
             } catch (e: Exception) {
@@ -388,6 +461,19 @@ class AppUsageMonitorService : Service() {
         val isWasteful: Boolean
     )
 
+    private fun getAppInfoFromCurrentApp(): AppInfo? {
+        val pkg = currentApp ?: return null
+        return if (pkg.startsWith("web:")) {
+            val host = pkg.removePrefix("web:")
+            val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
+            AppInfo(packageName = pkg, readableName = host, isWasteful = wasteful)
+        } else {
+            val readable = getReadableAppName(pkg)
+            val wasteful = isWastefulApp(pkg)
+            AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful)
+        }
+    }
+
     private fun getCurrentAppUsage(): AppInfo? {
         val usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
@@ -402,6 +488,12 @@ class AppUsageMonitorService : Service() {
                     Log.w(TAG, "User is locked, cannot query usage events")
                     return null
                 }
+            }
+
+            // If device is locked or screen is not interactive, treat as no foreground app
+            if (isDeviceLockedOrScreenOff()) {
+                Log.v(TAG, "Device locked or screen off; returning no current app")
+                return null
             }
 
             // Use queryEvents instead of queryUsageStats for real-time detection
@@ -434,8 +526,12 @@ class AppUsageMonitorService : Service() {
                 }
             }
             
-            // If we found a foreground app, return its info
+            // If we found a foreground app, return its info unless it's the launcher/home
             if (currentForegroundApp != null) {
+                if (isHomeLauncher(currentForegroundApp)) {
+                    Log.v(TAG, "Foreground is launcher; treating as no app")
+                    return null
+                }
                 // Check if it is a browser and whether we have a hostname from the accessibility service
                 val browserHost = BrowserUrlAccessibilityService.getCurrentHostname()
                 if (browserHost != null && isBrowserPackage(currentForegroundApp)) {
@@ -467,6 +563,7 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun updateTimeTracking(appInfo: AppInfo?) {
+        // Only use newly detected app; do not carry previous when detection is null
         val detectedApp = appInfo?.packageName ?: ""
         val isCurrentlyWasteful = appInfo?.isWasteful == true
 
@@ -521,18 +618,21 @@ class AppUsageMonitorService : Service() {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
              
              // Add time spent on previous app IF IT WAS WASTEFUL
-             if (currentApp != null && isWastefulApp(currentApp!!)) {
-                 val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
-                 if (timeSpent < TimeUnit.MINUTES.toMillis(5)) { 
-                     sessionWastedTime.addAndGet(timeSpent)
-                     dailyWastedTime.addAndGet(timeSpent)
-                     Log.d(TAG, "Added $timeSpent ms to wasteful time (previous app: $currentApp)")
-                 } else {
-                      Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for previous app: $currentApp")
+             currentApp?.let { app ->
+                 if (isWastefulApp(app)) {
+                     val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
+                     if (timeSpent < TimeUnit.MINUTES.toMillis(5)) { 
+                         sessionWastedTime.addAndGet(timeSpent)
+                         dailyWastedTime.addAndGet(timeSpent)
+                         Log.d(TAG, "Added $timeSpent ms to wasteful time (previous app: $app)")
+                     } else {
+                          Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for previous app: $app")
+                     }
                  }
              }
 
-             currentApp = detectedApp
+            // Update currentApp; if detection is empty, clear current app
+            currentApp = if (detectedApp.isNotEmpty()) detectedApp else null
              lastAppChangeTime.set(System.currentTimeMillis())
 
              // Reset session timer ONLY when a *new* wasteful app starts
@@ -611,7 +711,12 @@ class AppUsageMonitorService : Service() {
 
     private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
         Log.d(TAG, "showConversationNotification called. History size: ${conversationHistoryManager.getUserVisibleHistory().size}")
-        
+        // Never show conversation notifications when device is locked or screen off
+        if (isDeviceLockedOrScreenOff()) {
+            Log.w(TAG, "Suppressing conversation notification: device locked or screen off")
+            return
+        }
+
         if (conversationHistoryManager.getUserVisibleHistory().isEmpty()) {
              Log.w(TAG, "showConversationNotification called with empty history. No notification to show.")
              return
@@ -668,11 +773,9 @@ class AppUsageMonitorService : Service() {
 
     private fun createStatsNotification(): android.app.Notification {
         val monitoringStatus = "Monitoring: Active"
-        val currentAppName = if (currentApp != null && isWastefulApp(currentApp!!)) {
-            getReadableAppName(currentApp!!)
-        } else {
-            "No distracting app active"
-        }
+        val currentAppName = currentApp?.let { app ->
+            if (isWastefulApp(app)) getReadableAppName(app) else "No distracting app active"
+        } ?: "No distracting app active"
         val maxThresholdMs = TimeUnit.MINUTES.toMillis(
             SettingsManager.getMaxThresholdMinutes(this).toLong()
         )
@@ -735,6 +838,32 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "Notification channels created")
     }
 
+    // ---------- Device/launcher helpers ----------
+    private fun isDeviceLockedOrScreenOff(): Boolean {
+        return try {
+            val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val locked = keyguard.isKeyguardLocked
+            val interactive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) power.isInteractive else true
+            locked || !interactive
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking device lock/screen state", e)
+            false
+        }
+    }
+
+    private fun isHomeLauncher(packageName: String): Boolean {
+        return try {
+            val intent = Intent(ACTION_MAIN).addCategory(CATEGORY_HOME)
+            val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            val homePkg = resolveInfo?.activityInfo?.packageName
+            packageName == homePkg
+        } catch (e: Exception) {
+            Log.e(TAG, "Error determining home launcher", e)
+            false
+        }
+    }
+
     private fun getReadableAppName(packageName: String): String {
         return try {
             val appInfo = packageManager.getApplicationInfo(packageName, 0)
@@ -795,6 +924,16 @@ class AppUsageMonitorService : Service() {
         serviceScope.cancel()
         executor.shutdown()
         isMonitoringScheduled = false
+        // Unregister receiver
+        try {
+            if (screenStateReceiver != null) {
+                unregisterReceiver(screenStateReceiver)
+                screenStateReceiver = null
+                Log.d(TAG, "Screen state receiver unregistered")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering screen state receiver", e)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
