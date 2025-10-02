@@ -32,19 +32,20 @@ object AIMemoryManager {
         Log.d(TAG, "Added permanent memory: $content")
     }
 
-    fun addTemporaryMemory(context: Context, content: String, durationMinutes: Int) {
+    fun addTemporaryMemory(context: Context, content: String, durationMinutes: Int, timeProvider: TimeProvider = SystemTimeProvider) {
         val prefs = getPreferences(context)
-        val expiresAt = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(durationMinutes.toLong())
-        val key = "${TEMPORARY_MEMORY_PREFIX}${System.currentTimeMillis()}"
+        val now = timeProvider.now()
+        val expiresAt = now + TimeUnit.MINUTES.toMillis(durationMinutes.toLong())
+        val key = "${TEMPORARY_MEMORY_PREFIX}$now"
         
         // Store as "content|expiresAt"
         prefs.edit().putString(key, "$content|$expiresAt").apply()
         Log.d(TAG, "Added temporary memory for $durationMinutes minutes: $content")
     }
 
-    fun getAllMemories(context: Context): String {
+    fun getAllMemories(context: Context, timeProvider: TimeProvider = SystemTimeProvider): String {
         val prefs = getPreferences(context)
-        val currentTime = System.currentTimeMillis()
+        val currentTime = timeProvider.now()
         val memories = mutableListOf<String>()
 
         // Add permanent memories

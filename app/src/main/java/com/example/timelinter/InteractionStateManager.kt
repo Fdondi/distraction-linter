@@ -11,13 +11,16 @@ enum class InteractionState {
     WAITING_FOR_RESPONSE // Step 5b-6: Waiting for user response with timeout
 }
 
-class InteractionStateManager(private val context: Context) {
+class InteractionStateManager(
+    private val context: Context,
+    private val timeProvider: TimeProvider = SystemTimeProvider
+) {
     private val TAG = "InteractionStateManager"
     
     @Volatile
     private var currentState = InteractionState.OBSERVING
     
-    private val lastStateChangeTime = AtomicLong(System.currentTimeMillis())
+    private val lastStateChangeTime = AtomicLong(timeProvider.now())
     private val responseTimeoutTime = AtomicLong(0)
     private val allowedUntilTime = AtomicLong(0)
     
@@ -36,7 +39,7 @@ class InteractionStateManager(private val context: Context) {
         if (currentState != InteractionState.OBSERVING) return false
         
         val observeTimerMinutes = SettingsManager.getObserveTimerMinutes(context)
-        val timeSinceLastChange = System.currentTimeMillis() - lastStateChangeTime.get()
+        val timeSinceLastChange = timeProvider.now() - lastStateChangeTime.get()
         val observeTimerMs = TimeUnit.MINUTES.toMillis(observeTimerMinutes.toLong())
         
         return timeSinceLastChange >= observeTimerMs
@@ -46,11 +49,11 @@ class InteractionStateManager(private val context: Context) {
         if (currentState != InteractionState.WAITING_FOR_RESPONSE) return false
         
         val timeoutTime = responseTimeoutTime.get()
-        return timeoutTime > 0 && System.currentTimeMillis() >= timeoutTime
+        return timeoutTime > 0 && timeProvider.now() >= timeoutTime
     }
     
     fun isAllowed(appName: String? = null): Boolean {
-        val currentTime = System.currentTimeMillis()
+        val currentTime = timeProvider.now()
         
         // Check global allow
         if (currentTime < allowedUntilTime.get()) {
@@ -73,7 +76,7 @@ class InteractionStateManager(private val context: Context) {
     fun startConversation() {
         Log.d(TAG, "Starting conversation (threshold exceeded)")
         currentState = InteractionState.CONVERSATION_ACTIVE
-        lastStateChangeTime.set(System.currentTimeMillis())
+        lastStateChangeTime.set(timeProvider.now())
     }
     
     fun startWaitingForResponse() {
@@ -82,7 +85,7 @@ class InteractionStateManager(private val context: Context) {
         
         val responseTimerMinutes = SettingsManager.getResponseTimerMinutes(context)
         val timeoutMs = TimeUnit.MINUTES.toMillis(responseTimerMinutes.toLong())
-        responseTimeoutTime.set(System.currentTimeMillis() + timeoutMs)
+        responseTimeoutTime.set(timeProvider.now() + timeoutMs)
         
         Log.d(TAG, "Response timeout set for ${java.util.Date(responseTimeoutTime.get())}")
     }
@@ -90,13 +93,13 @@ class InteractionStateManager(private val context: Context) {
     fun resetToObserving() {
         Log.d(TAG, "Resetting to observing state")
         currentState = InteractionState.OBSERVING
-        lastStateChangeTime.set(System.currentTimeMillis())
+        lastStateChangeTime.set(timeProvider.now())
         responseTimeoutTime.set(0)
     }
     
     fun applyAllowCommand(allowCommand: ToolCommand.Allow) {
         val allowMs = TimeUnit.MINUTES.toMillis(allowCommand.minutes.toLong())
-        val allowUntil = System.currentTimeMillis() + allowMs
+        val allowUntil = timeProvider.now() + allowMs
         
         if (allowCommand.app != null) {
             // App-specific allow
@@ -119,18 +122,18 @@ class InteractionStateManager(private val context: Context) {
     }
     
     fun getTimeSinceLastStateChange(): Long {
-        return System.currentTimeMillis() - lastStateChangeTime.get()
+        return timeProvider.now() - lastStateChangeTime.get()
     }
     
     fun getTimeUntilResponseTimeout(): Long {
         if (currentState != InteractionState.WAITING_FOR_RESPONSE) return 0
         val timeoutTime = responseTimeoutTime.get()
         if (timeoutTime == 0L) return 0
-        return maxOf(0, timeoutTime - System.currentTimeMillis())
+        return maxOf(0, timeoutTime - timeProvider.now())
     }
     
     fun cleanupExpiredAllows() {
-        val currentTime = System.currentTimeMillis()
+        val currentTime = timeProvider.now()
         
         // Clean up expired app-specific allows
         val iterator = appAllowTimes.iterator()
