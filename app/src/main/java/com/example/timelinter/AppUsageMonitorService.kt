@@ -416,6 +416,10 @@ class AppUsageMonitorService : Service() {
                     Log.d(TAG, "Resetting conversation (ALLOW used or no message) - archiving first")
                     tryArchiveMemoriesThenClear(appInfo)
                     interactionStateManager.resetToObserving()
+                    
+                    // Cancel the conversation notification since history is cleared
+                    notificationManager.cancel(NOTIFICATION_ID)
+                    Log.d(TAG, "Cancelled conversation notification due to conversation reset")
                 } else {
                     // Step 5b: Continue conversation, wait for response
                     Log.d(TAG, "Continuing conversation, waiting for user response")
@@ -609,6 +613,10 @@ class AppUsageMonitorService : Service() {
             Log.i(TAG, "Token bucket refilled to full while wasteful: archiving and clearing conversation.")
             tryArchiveMemoriesThenClear(appInfo)
             interactionStateManager.resetToObserving()
+            
+            // Cancel the conversation notification since history is cleared
+            notificationManager.cancel(NOTIFICATION_ID)
+            Log.d(TAG, "Cancelled conversation notification due to bucket refill and history clear")
         }
 
         // ---------------- Existing time tracking logic ----------------
@@ -924,6 +932,11 @@ class AppUsageMonitorService : Service() {
         serviceScope.cancel()
         executor.shutdown()
         isMonitoringScheduled = false
+        
+        // Cancel all notifications when service is destroyed
+        notificationManager.cancelAll()
+        Log.d(TAG, "Cancelled all notifications on service destroy")
+        
         // Unregister receiver
         try {
             if (screenStateReceiver != null) {
