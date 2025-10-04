@@ -94,17 +94,19 @@ fun AILogScreen(
                                 )
                             }
                         } else {
+                            val isToolCall = text.startsWith("🔧 TOOL CALLED:")
+                            
                             ListItem(
                                 headlineContent = {
                                     Text(
-                                        text = "${index + 1}. ${role.uppercase()}",
+                                        text = "${index + 1}. ${role.uppercase()}${if (isToolCall) " (TOOL)" else ""}",
                                         style = MaterialTheme.typography.titleSmall
                                     )
                                 },
                                 supportingContent = {
                                     Text(
                                         text = text,
-                                        maxLines = 10,
+                                        maxLines = if (isToolCall) 3 else 10,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }

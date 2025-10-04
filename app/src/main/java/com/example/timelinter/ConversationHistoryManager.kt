@@ -240,8 +240,8 @@ class ConversationHistoryManager(
     // Log tool usage to API history only (hidden from user-visible chat)
     fun addToolLog(tool: ToolCommand) {
         val note = when (tool) {
-            is ToolCommand.Allow -> "ALLOW ${tool.minutes}${tool.app?.let { " min for '" + it + "'" } ?: " min"}"
-            is ToolCommand.Remember -> "REMEMBER ${tool.durationMinutes?.let { "$it min" } ?: "FOREVER"}: ${tool.content}"
+            is ToolCommand.Allow -> "🔧 TOOL CALLED: allow(${tool.minutes}${tool.app?.let { ", \"$it\"" } ?: ""}) - This tool call was made alongside the previous model response"
+            is ToolCommand.Remember -> "🔧 TOOL CALLED: remember(\"${tool.content}\"${tool.durationMinutes?.let { ", $it" } ?: ""}) - This tool call was made alongside the previous model response"
         }
         apiConversationHistory.addModelNote(note)
         publishApiHistory()
