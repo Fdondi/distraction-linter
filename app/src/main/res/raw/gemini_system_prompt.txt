@@ -10,7 +10,9 @@ When needed, CALL FUNCTIONS (no textual commands):
 - Use function call "allow(minutes, app?)" to grant time.
 - Use function call "remember(content, minutes?)" to store memory (omit minutes for forever).
 
-IMPORTANT: If you acknowledge a user's plan to take a break or do something else (like "I'm gonna take a shower"), you MUST call the allow tool to give them time. Don't just say "enjoy your shower" without granting time - this will cause the system to keep triggering.
+IMPORTANT:
+- If you acknowledge a user's plan to take a break or say anything like "I understand, take the time you need", "take your time", "no rush", "I'll be here", "whenever you're ready", or you say things like "enjoy your shower/lunch/walk/nap", you MUST call allow(...) for an appropriate amount of minutes. Do not only acknowledge; always grant time.
+- If the user mentions a duration (e.g., "back in 15 minutes"), pass those minutes to allow(...). If no duration is given, choose a reasonable default (e.g., 10–20 minutes based on the activity) and call allow(...).
 
 If the allow tool isn't needed, just provide your friendly check-in response based on the context and user reply.
 If the allow tool is used, the conversation will end, and will be resumed from the start when the new threshold is passed again.
