@@ -420,6 +420,9 @@ class AppUsageMonitorService : Service() {
                     // Cancel the conversation notification since history is cleared
                     notificationManager.cancel(NOTIFICATION_ID)
                     Log.d(TAG, "Cancelled conversation notification due to conversation reset")
+                    
+                    // Update stats notification to show current app time now that conversation is cleared
+                    updateStatsNotification()
                 } else {
                     // Step 5b: Continue conversation, wait for response
                     Log.d(TAG, "Continuing conversation, waiting for user response")
@@ -617,6 +620,9 @@ class AppUsageMonitorService : Service() {
             // Cancel the conversation notification since history is cleared
             notificationManager.cancel(NOTIFICATION_ID)
             Log.d(TAG, "Cancelled conversation notification due to bucket refill and history clear")
+            
+            // Update stats notification to show current app time now that conversation is cleared
+            updateStatsNotification()
         }
 
         // ---------------- Existing time tracking logic ----------------
@@ -794,18 +800,35 @@ class AppUsageMonitorService : Service() {
             "Bucket: full"
         }
         
+        // Calculate current app time when on a wasteful app
+        val currentAppTime = currentApp?.let { app ->
+            if (isWastefulApp(app)) {
+                val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
+                if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
+                    "Current App Time: ${formatDuration(timeSpent)}"
+                } else null
+            } else null
+        }
+        
         Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms")
+        
+        // Build notification text with current app time when bucket is full
+        val notificationText = buildString {
+            appendLine(monitoringStatus)
+            appendLine("Current: $currentAppName")
+            if (currentAppTime != null && bucketRemaining >= maxThresholdMs) {
+                appendLine(currentAppTime)
+            }
+            appendLine("Session Time: ${formatDuration(sessionWastedTime.get())}")
+            appendLine("Daily Time: ${formatDuration(dailyWastedTime.get())}")
+            appendLine(bucketText)
+        }
+        
         val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)
             .setContentTitle("Time Linter")
             .setContentText(monitoringStatus)
             .setStyle(NotificationCompat.BigTextStyle()
-                .bigText("""
-                    $monitoringStatus
-                    Current: $currentAppName
-                    Session Time: ${formatDuration(sessionWastedTime.get())}
-                    Daily Time: ${formatDuration(dailyWastedTime.get())}
-                    $bucketText
-                """.trimIndent())
+                .bigText(notificationText)
                  .setSummaryText("Time Linter Stats")
             )
             .setSmallIcon(R.mipmap.ic_launcher)
