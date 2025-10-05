@@ -43,6 +43,16 @@ object AIMemoryManager {
         Log.d(TAG, "Added temporary memory for $durationMinutes minutes: $content")
     }
 
+    fun setPermanentMemory(context: Context, content: String) {
+        val prefs = getPreferences(context)
+        prefs.edit().putString(PERMANENT_MEMORY_KEY, content).apply()
+        Log.d(TAG, "Set permanent memory (replaced): ${content.take(64)}")
+    }
+
+    fun getPermanentMemory(context: Context): String {
+        return getPreferences(context).getString(PERMANENT_MEMORY_KEY, "") ?: ""
+    }
+
     fun getAllMemories(context: Context, timeProvider: TimeProvider = SystemTimeProvider): String {
         val prefs = getPreferences(context)
         val currentTime = timeProvider.now()

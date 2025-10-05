@@ -8,6 +8,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.google.ai.client.generativeai.type.Content
@@ -20,6 +22,16 @@ fun AILogScreen(
 ) {
     val history by ConversationLogStore.apiHistory.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
+    val context = LocalContext.current
+
+    // Ensure memory is initialized when opening this screen
+    LaunchedEffect(Unit) {
+        val current = AIMemoryManager.getAllMemories(context)
+        ConversationLogStore.setMemory(current)
+    }
+
+    var isEditing by remember { mutableStateOf(false) }
+    var editorText by remember(aiMemory) { mutableStateOf(aiMemory) }
 
     Scaffold(
         topBar = {
@@ -48,11 +60,51 @@ fun AILogScreen(
                     .fillMaxWidth()
                     .padding(bottom = 16.dp)
             ) {
-                Text(
-                    text = if (aiMemory.isBlank()) "(No AI memory yet)" else aiMemory,
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                    if (!isEditing) {
+                        Text(
+                            text = if (aiMemory.isBlank()) "(No AI memory yet)" else aiMemory,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = {
+                                editorText = aiMemory
+                                isEditing = true
+                            }) {
+                                Text("Edit")
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = editorText,
+                            onValueChange = { editorText = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp)
+                                .testTag("aiMemoryEditor"),
+                            minLines = 4,
+                            label = { Text("Permanent AI memory") }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                AIMemoryManager.setPermanentMemory(context, editorText)
+                                val updated = AIMemoryManager.getAllMemories(context)
+                                ConversationLogStore.setMemory(updated)
+                                isEditing = false
+                            }) {
+                                Text("Save")
+                            }
+                            OutlinedButton(onClick = {
+                                isEditing = false
+                                editorText = aiMemory
+                            }) {
+                                Text("Cancel")
+                            }
+                        }
+                    }
+                }
             }
 
             if (history.isEmpty()) {
