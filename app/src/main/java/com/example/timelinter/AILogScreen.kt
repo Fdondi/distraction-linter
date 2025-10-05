@@ -22,6 +22,7 @@ fun AILogScreen(
     onNavigateBack: () -> Unit
 ) {
     val history by ConversationLogStore.apiHistory.collectAsState()
+    val events by EventLogStore.events.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
     val context = LocalContext.current
 
@@ -160,9 +161,25 @@ fun AILogScreen(
                 }
             }
 
-            if (history.isEmpty()) {
+            // Event log with search
+            Spacer(Modifier.height(16.dp))
+            var query by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("eventLogSearch"),
+                label = { Text("Search events") },
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+            val filtered = remember(events, query) {
+                if (query.isBlank()) events else EventLogStore.search(query)
+            }
+            if (filtered.isEmpty()) {
                 Text(
-                    text = "No AI conversation yet.",
+                    text = "No events yet.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             } else {
@@ -170,53 +187,37 @@ fun AILogScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    itemsIndexed(history) { index: Int, content ->
-                        val role = content.role ?: "unknown"
-                        val text = content.parts.joinToString("\n") { part ->
-                            when (part) {
-                                is com.google.ai.client.generativeai.type.TextPart -> part.text
-                                else -> part.toString()
-                            }
+                    itemsIndexed(filtered) { index: Int, entry ->
+                        val headline = when (entry.type) {
+                            EventType.MESSAGE -> "${index + 1}. ${entry.title}"
+                            EventType.TOOL -> "${index + 1}. ${entry.title}"
+                            EventType.STATE -> "${index + 1}. ${entry.title}"
+                            EventType.APP -> "${index + 1}. ${entry.title}"
+                            EventType.BUCKET -> "${index + 1}. ${entry.title}"
+                            EventType.SYSTEM -> "${index + 1}. ${entry.title}"
                         }
-
-                        val isSeparator = text.startsWith("------ NEW CONVERSATION:")
-
-                        if (isSeparator) {
-                            // Special styling for session separators
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            ) {
+                        ListItem(
+                            headlineContent = {
                                 Text(
-                                    text = text,
-                                    modifier = Modifier.padding(16.dp),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    text = headline,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            },
+                            overlineContent = {
+                                Text(
+                                    text = entry.type.name,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            supportingContent = {
+                                val roleSuffix = entry.role?.let { " ($it)" } ?: ""
+                                Text(
+                                    text = (entry.details ?: "") + roleSuffix,
+                                    maxLines = 8,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                        } else {
-                            val isToolCall = text.startsWith("🔧 TOOL CALLED:")
-                            
-                            ListItem(
-                                headlineContent = {
-                                    Text(
-                                        text = "${index + 1}. ${role.uppercase()}${if (isToolCall) " (TOOL)" else ""}",
-                                        style = MaterialTheme.typography.titleSmall
-                                    )
-                                },
-                                supportingContent = {
-                                    Text(
-                                        text = text,
-                                        maxLines = if (isToolCall) 3 else 10,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            )
-                        }
+                        )
                         HorizontalDivider()
                     }
                 }

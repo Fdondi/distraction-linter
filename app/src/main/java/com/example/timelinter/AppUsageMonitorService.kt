@@ -629,6 +629,7 @@ class AppUsageMonitorService : Service() {
         val becameFull = oldRemaining <= 0L && updateResult.newRemainingMs >= maxThresholdMs
         if (becameFull && isCurrentlyWasteful) {
             Log.i(TAG, "Token bucket refilled to full while wasteful: archiving and clearing conversation.")
+            EventLogStore.logBucketRefilledAndReset()
             tryArchiveMemoriesThenClear(appInfo)
             interactionStateManager.resetToObserving()
             
@@ -645,6 +646,7 @@ class AppUsageMonitorService : Service() {
         // App change detection and time accumulation logic
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
+             EventLogStore.logAppChanged(currentApp, detectedApp)
              
              // Add time spent on previous app IF IT WAS WASTEFUL
              currentApp?.let { app ->
@@ -669,6 +671,7 @@ class AppUsageMonitorService : Service() {
                   sessionWastedTime.set(0)
                   sessionStartTime.set(System.currentTimeMillis())
                   Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
+                  EventLogStore.logNewWastefulAppDetected(detectedApp)
              }
          } else if (isCurrentlyWasteful) {
              // Accumulate time for current wasteful app

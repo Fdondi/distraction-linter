@@ -194,6 +194,7 @@ class ConversationHistoryManager(
 
     fun startNewSession(appName: String, sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
         Log.i(TAG, "Starting new session for $appName")
+        EventLogStore.logSessionStarted(appName)
         
         // Clear user-visible history (this resets for each session)
         userConversationHistory.clear()
@@ -220,6 +221,7 @@ class ConversationHistoryManager(
     fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
         userConversationHistory.addUserMessage(messageText)
         apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
+        EventLogStore.logMessage("user", messageText)
         publishApiHistory()
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
@@ -234,6 +236,7 @@ class ConversationHistoryManager(
     fun addAIMessage(messageText: String) {
         userConversationHistory.addAIMessage(messageText)
         apiConversationHistory.addAIMessage(messageText)
+        EventLogStore.logMessage("model", messageText)
         publishApiHistory()
     }
 
@@ -244,6 +247,7 @@ class ConversationHistoryManager(
             is ToolCommand.Remember -> "🔧 TOOL CALLED: remember(\"${tool.content}\"${tool.durationMinutes?.let { ", $it" } ?: ""}) - This tool call was made alongside the previous model response"
         }
         apiConversationHistory.addModelNote(note)
+        EventLogStore.logTool(tool)
         publishApiHistory()
     }
 
@@ -262,6 +266,7 @@ class ConversationHistoryManager(
         userConversationHistory.clear()
         apiConversationHistory.clear()
         Log.d(TAG, "Cleared all conversation histories")
+        EventLogStore.logSessionReset("Conversation cleared")
         publishApiHistory()
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }

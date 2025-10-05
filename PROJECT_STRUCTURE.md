@@ -125,6 +125,21 @@ Tests
   - `AIMemoryRulesAndTempUITest.kt` – rules editor and temp grouping in UI
   - `FakeTimeProvider.kt`, `TimeFlowsTest.kt`
 
+Event Log
+- app/src/main/java/com/example/timelinter/EventLogStore.kt
+  - Centralized event log with reverse-chronological entries and in-memory search.
+  - Event types: `MESSAGE`, `TOOL`, `STATE`, `APP`, `BUCKET`, `SYSTEM`.
+  - Public APIs: `logMessage`, `logTool`, `logStateChange`, `logSessionStarted`, `logSessionReset`, `logAppChanged`, `logNewWastefulAppDetected`, `logBucketRefilledAndReset`, `search`.
+
+- UI integration in `AILogScreen`:
+  - Shows a searchable event feed (most recent at the top) covering messages, tool calls, state transitions, app changes, and bucket resets.
+  - Retains AI Memory editing and rules sections.
+
+- Hooks
+  - `ConversationHistoryManager` logs session start, user/model messages, tool calls, and resets.
+  - `InteractionStateManager` logs state changes on transitions.
+  - `AppUsageMonitorService` logs app changes, new wasteful app detection, and bucket refills that trigger conversation resets.
+
 How Things Connect (Quick Navigation)
 - Start monitoring: `MainActivity` toggles → `AppUsageMonitorService`
 - Conversation boot: `ConversationHistoryManager.startNewSession()` builds initial API history

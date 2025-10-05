@@ -77,6 +77,7 @@ class InteractionStateManager(
         Log.d(TAG, "Starting conversation (threshold exceeded)")
         currentState = InteractionState.CONVERSATION_ACTIVE
         lastStateChangeTime.set(timeProvider.now())
+        EventLogStore.logStateChange(currentState)
     }
     
     fun startWaitingForResponse() {
@@ -88,6 +89,7 @@ class InteractionStateManager(
         responseTimeoutTime.set(timeProvider.now() + timeoutMs)
         
         Log.d(TAG, "Response timeout set for ${java.util.Date(responseTimeoutTime.get())}")
+        EventLogStore.logStateChange(currentState)
     }
     
     fun resetToObserving() {
@@ -95,6 +97,7 @@ class InteractionStateManager(
         currentState = InteractionState.OBSERVING
         lastStateChangeTime.set(timeProvider.now())
         responseTimeoutTime.set(0)
+        EventLogStore.logStateChange(currentState)
     }
     
     fun applyAllowCommand(allowCommand: ToolCommand.Allow) {
@@ -119,6 +122,7 @@ class InteractionStateManager(
         Log.d(TAG, "Continuing conversation")
         currentState = InteractionState.CONVERSATION_ACTIVE
         responseTimeoutTime.set(0)
+        EventLogStore.logStateChange(currentState)
     }
     
     fun getTimeSinceLastStateChange(): Long {
