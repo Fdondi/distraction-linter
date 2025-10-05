@@ -1,0 +1,10 @@
+When to save AI memory (guidelines):
+- Save user preferences that matter across sessions (e.g., goals, constraints).
+- Save temporary context only if it helps the next session; set a duration.
+- Avoid saving redundant/obvious facts or volatile data.
+- Keep each memory concise and factual, one idea per line.
+
+Format for remember(content, minutes?):
+- Permanent: remember("<content>")
+- Temporary: remember("<content>", <minutes>)
+

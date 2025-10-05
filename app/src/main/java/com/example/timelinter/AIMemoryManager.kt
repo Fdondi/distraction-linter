@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import java.util.concurrent.TimeUnit
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 data class MemoryItem(
     val content: String,
@@ -14,6 +17,7 @@ object AIMemoryManager {
     private const val PREF_NAME = "ai_memory"
     private const val PERMANENT_MEMORY_KEY = "permanent_memory"
     private const val TEMPORARY_MEMORY_PREFIX = "temp_memory_"
+    private const val MEMORY_RULES_KEY = "memory_rules"
     private const val TAG = "AIMemoryManager"
 
     private fun getPreferences(context: Context): SharedPreferences {
@@ -51,6 +55,68 @@ object AIMemoryManager {
 
     fun getPermanentMemory(context: Context): String {
         return getPreferences(context).getString(PERMANENT_MEMORY_KEY, "") ?: ""
+    }
+
+    fun getMemoryRules(context: Context): String {
+        val prefs = getPreferences(context)
+        val existing = prefs.getString(MEMORY_RULES_KEY, null)
+        if (existing != null) return existing
+        // Fallback to default rules from raw resource
+        return try {
+            context.resources.openRawResource(R.raw.ai_memory_rules)
+                .bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            Log.w(TAG, "Default memory rules not found, returning empty string", e)
+            ""
+        }
+    }
+
+    fun setMemoryRules(context: Context, rules: String) {
+        getPreferences(context).edit().putString(MEMORY_RULES_KEY, rules).apply()
+        Log.d(TAG, "Updated memory rules (${rules.length} chars)")
+    }
+
+    data class TemporaryGroupByDate(
+        val expirationDateKey: String,
+        val items: List<String>
+    )
+
+    fun getActiveTemporaryGroupsByDate(
+        context: Context,
+        timeProvider: TimeProvider = SystemTimeProvider
+    ): List<TemporaryGroupByDate> {
+        val prefs = getPreferences(context)
+        val currentTime = timeProvider.now()
+        val editor = prefs.edit()
+        val groups = mutableMapOf<String, MutableList<String>>()
+
+        for ((key, value) in prefs.all) {
+            if (key.startsWith(TEMPORARY_MEMORY_PREFIX) && value is String) {
+                val parts = value.split("|")
+                if (parts.size == 2) {
+                    val content = parts[0]
+                    val expiresAt = parts[1].toLongOrNull()
+                    if (expiresAt != null) {
+                        if (currentTime < expiresAt) {
+                            val dateKey = LocalDate.ofInstant(
+                                Instant.ofEpochMilli(expiresAt),
+                                ZoneId.systemDefault()
+                            ).toString() // yyyy-MM-dd
+                            val list = groups.getOrPut(dateKey) { mutableListOf() }
+                            list.add(content)
+                        } else {
+                            editor.remove(key)
+                            Log.d(TAG, "Removed expired temp memory while grouping: $content")
+                        }
+                    }
+                }
+            }
+        }
+        editor.apply()
+
+        return groups.entries
+            .sortedBy { it.key }
+            .map { TemporaryGroupByDate(it.key, it.value.toList()) }
     }
 
     fun getAllMemories(context: Context, timeProvider: TimeProvider = SystemTimeProvider): String {
