@@ -218,8 +218,14 @@ class AppUsageMonitorService : Service() {
                 val action = intent?.action
                 when (action) {
                     Intent.ACTION_SCREEN_OFF -> {
-                        Log.i(TAG, "Screen turned off; stopping monitoring tasks")
+                        Log.i(TAG, "Screen turned off; stopping monitoring tasks and clearing current app")
                         if (isMonitoringScheduled) stopMonitoringTasks("screen off")
+                        // Clear current app so that next unlock doesn't reuse stale context
+                        currentApp = null
+                        // Reset interaction state to observing to avoid mid-conversation surprises
+                        interactionStateManager.resetToObserving()
+                        // Cancel any in-flight conversation notification
+                        try { notificationManager.cancel(NOTIFICATION_ID) } catch (_: Throwable) {}
                     }
                     Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_UNLOCKED -> {
                         // Only resume if truly unlocked and interactive
@@ -290,6 +296,7 @@ class AppUsageMonitorService : Service() {
     private fun handleObservingState(appInfo: AppInfo?) {
         // Step 0-1 from interaction.md
         
+        val appInfo = appInfo ?: getCurrentAppUsage()
         val isWasteful = appInfo?.isWasteful == true
         val isAllowed = if (appInfo != null) interactionStateManager.isAllowed(appInfo.readableName) else false
         val remaining = bucketRemainingMs.get()
