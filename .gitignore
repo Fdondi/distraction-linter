@@ -1,12 +1,11 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+
+# Ignore most of .idea, except codeStyles which can be shared
+/.idea/*
+!/.idea/codeStyles/
+
 .DS_Store
 /build
 /app/build/
