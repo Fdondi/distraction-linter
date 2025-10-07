@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
  * This is extracted from the old SettingsScreen so that it can be opened directly
  * (without sharing a single Settings entry with timer configuration).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppSelectionScreen(
     onNavigateBack: () -> Unit
@@ -123,8 +122,8 @@ fun AppSelectionScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Select Apps") },
+            com.example.timelinter.ui.components.AppTopBar(
+                title = "Select Apps",
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

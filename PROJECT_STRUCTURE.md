@@ -10,6 +10,7 @@ Entrypoint and UI
     - `AppSelectionScreen` (manage wasteful apps)
     - `TimerSettingsScreen` (thresholds/timers)
     - `AILogScreen` (AI memory + API history)
+    - `AIConfigScreen` (AI model configuration)
   - Top‑bar actions to open screens; persists user notes and coach name via `ApiKeyManager`.
 
 - app/src/main/java/com/example/timelinter/AILogScreen.kt
@@ -34,13 +35,28 @@ Background Services and Flow
     - `AIInteractionManager` (Gemini model + calls)
   - Responds to tool commands (Allow/Remember) and updates storage (`AIMemoryManager`) and UI store (`ConversationLogStore`).
 
+Reset Event (Bucket Refilled to Full)
+- Trigger: When the token bucket transitions from empty (<=0) back to full (== max) during non‑wasteful time accumulation.
+  - Code: `AppUsageMonitorService.updateTimeTracking(...)` → `TokenBucket.update(...)` → check `becameFull`.
+- Actions:
+  1) Review active API history to extract memories (permanent or temporary) via an AI prompt
+     - Code: `AppUsageMonitorService.tryArchiveMemoriesThenClear(...)` → adds API‑only prompt → `aiManager.generateFromContents(...)` → `AIMemoryManager.addPermanentMemory(...)` when appropriate.
+  2) Reset active histories (both API and user‑visible); the persistent log tab is not cleared
+     - Code: `ConversationHistoryManager.clearHistories()` (publishes reset and leaves `ConversationLogStore` intact).
+  3) Conversation returns to observing; the next interaction will be a First Message, not a continuation
+     - Code: `InteractionStateManager.resetToObserving()` → later `handleObservingState(...)` calls `startNewSession(...)` and `generateAIResponse(..., AITask.FIRST_MESSAGE)`.
+  4) Log and notifications
+     - Code: `EventLogStore.logBucketRefilledAndReset()` and notification cleanup in `AppUsageMonitorService`.
+
 - app/src/main/java/com/example/timelinter/BrowserUrlAccessibilityService.kt
   - AccessibilityService to read browser URL signals (wasteful or not).
 
 AI and Conversation
 - app/src/main/java/com/example/timelinter/AIInteractionManager.kt
   - Wraps Google AI GenerativeModel calls (initialization, subsequent calls, error handling).
+  - Uses `AIConfigManager` to get the configured model for each task.
   - Sends composed history from `ConversationHistoryManager`.
+  - Supports switching between different AI models for different tasks.
 
 - app/src/main/java/com/example/timelinter/ConversationHistoryManager.kt
   - Owns two histories: user‑visible vs API (model) history.
@@ -68,6 +84,31 @@ Memory and Settings
 
 - app/src/main/java/com/example/timelinter/ApiKeyManager.kt
   - Stores API key, coach name, and user notes.
+
+AI Configuration
+- app/src/main/java/com/example/timelinter/AIConfigManager.kt
+  - Manages AI model configuration per task type (conversation, summary, analysis).
+  - Stores configurations in SharedPreferences.
+  - Supports export/import of configurations as JSON.
+  - Provides default model configurations for each task.
+
+- app/src/main/java/com/example/timelinter/AITask.kt
+  - Enum defining different types of AI tasks (FIRST_MESSAGE, FOLLOWUP_NO_RESPONSE, USER_RESPONSE).
+  - Each task corresponds to a stage in the conversation flow and can have a different AI model configured.
+
+- app/src/main/java/com/example/timelinter/AIProvider.kt
+  - Enum for AI providers (GOOGLE_AI, OPENAI, ANTHROPIC, CUSTOM).
+
+- app/src/main/java/com/example/timelinter/AIModelConfig.kt
+  - Data class for AI model configuration.
+  - Contains model name, display name, provider, description, and optional parameters.
+  - Defines available pre-configured models and default configurations.
+
+- app/src/main/java/com/example/timelinter/AIConfigScreen.kt
+  - UI screen for configuring AI models per task.
+  - Allows selection of different models for different tasks.
+  - Provides export/import functionality for configurations.
+  - Accessible from main screen via Settings icon in top bar.
 
 Wasteful Apps and Token Bucket
 - app/src/main/java/com/example/timelinter/TimeWasterAppManager.kt

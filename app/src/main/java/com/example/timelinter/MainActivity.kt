@@ -21,6 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Hexagon
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,7 +38,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
 import androidx.core.net.toUri
-
+import com.example.timelinter.ui.components.AppTopBar
 class MainActivity : ComponentActivity() {
 
     private var showUsageAccessDialog by mutableStateOf(false)
@@ -74,6 +78,7 @@ class MainActivity : ComponentActivity() {
                 var showAppsScreen by remember { mutableStateOf(false) }
                 var showTimerScreen by remember { mutableStateOf(false) }
                 var showLogScreen by remember { mutableStateOf(false) }
+                var showAIConfigScreen by remember { mutableStateOf(false) }
 
                 if (showAppsScreen) {
                     AppSelectionScreen(onNavigateBack = { showAppsScreen = false })
@@ -81,6 +86,23 @@ class MainActivity : ComponentActivity() {
                     TimerSettingsScreen(onNavigateBack = { showTimerScreen = false })
                 } else if (showLogScreen) {
                     AILogScreen(onNavigateBack = { showLogScreen = false })
+                } else if (showAIConfigScreen) {
+                    Scaffold(
+                        topBar = {
+                            AppTopBar(
+                                title = "AI Configuration",
+                                navigationIcon = {
+                                    IconButton(onClick = { showAIConfigScreen = false }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                    }
+                                }
+                            )
+                        }
+                    ) { padding ->
+                        Box(modifier = Modifier.padding(padding)) {
+                            AIConfigScreen()
+                        }
+                    }
                 } else {
                     TimeLinterApp(
                         isMonitoring = isMonitoringActive,
@@ -105,6 +127,7 @@ class MainActivity : ComponentActivity() {
                         onOpenApps = { showAppsScreen = true },
                         onOpenTimers = { showTimerScreen = true },
                         onOpenLog = { showLogScreen = true },
+                        onOpenAIConfig = { showAIConfigScreen = true },
                         userNotes = userNotes,
                         onSaveUserNotes = {
                             ApiKeyManager.saveUserNotes(this, it)
@@ -120,7 +143,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         // Update monitoring state based on service status
-        isMonitoringActive = isServiceRunning(AppUsageMonitorService::class.java)
+        isMonitoringActive = isServiceRunning()
     }
 
     override fun onResume() {
@@ -268,7 +291,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // Helper to check if a service is running
-    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+    private fun isServiceRunning(): Boolean {
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         // Use the modern approach for checking running services
         return manager.runningAppProcesses?.any { processInfo ->
@@ -277,7 +300,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimeLinterApp(
     isMonitoring: Boolean,
@@ -296,6 +318,7 @@ fun TimeLinterApp(
     onOpenApps: () -> Unit,
     onOpenTimers: () -> Unit,
     onOpenLog: () -> Unit,
+    onOpenAIConfig: () -> Unit,
     userNotes: String,
     onSaveUserNotes: (String) -> Unit,
     coachName: String,
@@ -315,20 +338,20 @@ fun TimeLinterApp(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text(stringResource(id = R.string.app_name)) },
+            AppTopBar(
+                title = stringResource(id = R.string.app_name),
                 actions = {
-                    // Apps button
                     IconButton(onClick = onOpenApps) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Manage Apps")
                     }
-                    // Timer settings button
                     IconButton(onClick = onOpenTimers) {
                         Icon(Icons.Default.Timer, contentDescription = "Timer Settings")
                     }
-                    // AI Log button
                     IconButton(onClick = onOpenLog) {
                         Icon(Icons.Default.History, contentDescription = "AI Log")
+                    }
+                    IconButton(onClick = onOpenAIConfig) {
+                        Icon(Icons.Default.Cloud, contentDescription = "AI Configuration")
                     }
                 }
             )

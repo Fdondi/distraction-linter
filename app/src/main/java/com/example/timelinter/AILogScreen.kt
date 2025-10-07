@@ -16,12 +16,10 @@ import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AILogScreen(
     onNavigateBack: () -> Unit
 ) {
-    val history by ConversationLogStore.apiHistory.collectAsState()
     val events by EventLogStore.events.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
     val context = LocalContext.current
@@ -49,8 +47,8 @@ fun AILogScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("AI Log") },
+            com.example.timelinter.ui.components.AppTopBar(
+                title = "AI Log",
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

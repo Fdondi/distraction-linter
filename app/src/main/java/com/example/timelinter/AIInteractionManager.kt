@@ -23,26 +23,30 @@ Then keep updating the conversation this way, one AI and one user message.
 
 class AIInteractionManager(
     private val context: Context,
-    private val conversationHistoryManager: ConversationHistoryManager
+    private val conversationHistoryManager: ConversationHistoryManager,
+    private val defaultTask: AITask = AITask.FIRST_MESSAGE
 ) {
     private val TAG = "AIInteractionManager"
     private var generativeModel: GenerativeModel? = null
+    private var currentTask: AITask = defaultTask
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
-        initializeModel()
+        initializeModel(defaultTask)
     }
 
-    private fun initializeModel() {
+    private fun initializeModel(task: AITask = currentTask) {
         val apiKey = ApiKeyManager.getKey(context)
         if (apiKey != null) {
             try {
+                val modelConfig = AIConfigManager.getModelForTask(context, task)
                 generativeModel = GenerativeModel(
-                    modelName = "gemini-2.5-flash",
+                    modelName = modelConfig.modelName,
                     apiKey = apiKey
                     // Add safetySettings and generationConfig if needed
                 )
-                Log.i(TAG, "GenerativeModel initialized successfully with model gemini-2.5-flash.")
+                currentTask = task
+                Log.i(TAG, "GenerativeModel initialized successfully with model ${modelConfig.modelName} for task ${task.displayName}.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing GenerativeModel", e)
                 // Consider how to handle this error - e.g., notify user, disable AI features
@@ -53,20 +57,32 @@ class AIInteractionManager(
         }
     }
 
-    fun getInitializedModel(): GenerativeModel? {
-        if (generativeModel == null) {
-            Log.w(TAG, "getInitializedModel called but model is null. Attempting re-initialization.")
-            initializeModel() // Attempt to re-initialize if null
+    fun getInitializedModel(task: AITask = currentTask): GenerativeModel? {
+        // Re-initialize if task changed or model is null
+        if (generativeModel == null || task != currentTask) {
+            Log.w(TAG, "getInitializedModel called - reinitializing for task ${task.displayName}.")
+            initializeModel(task)
         }
         return generativeModel
+    }
+
+    /**
+     * Switch to a different AI task (and potentially different model)
+     */
+    fun switchTask(task: AITask) {
+        if (task != currentTask) {
+            Log.i(TAG, "Switching from ${currentTask.displayName} to ${task.displayName}")
+            initializeModel(task)
+        }
     }
 
     // Generate a response from explicitly provided contents (bypasses pulling from history)
     fun generateFromContents(
         contents: List<com.google.ai.client.generativeai.type.Content>,
-        onResponse: (String) -> Unit
+        onResponse: (String) -> Unit,
+        task: AITask = currentTask
     ) {
-        val currentModel = getInitializedModel() ?: run {
+        val currentModel = getInitializedModel(task) ?: run {
             onResponse("(Error: AI not initialized - Model unavailable)")
             return
         }
@@ -75,7 +91,7 @@ class AIInteractionManager(
                 val response = currentModel.generateContent(*contents.toTypedArray())
                 onResponse(response.text ?: "")
             } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API (custom contents)", e)
+                Log.e(TAG, "Error calling AI API (custom contents)", e)
                 onResponse("")
             }
         }
@@ -85,9 +101,10 @@ class AIInteractionManager(
         appName: String,
         sessionTimeMs: Long,
         dailyTimeMs: Long,
-        onResponse: (String) -> Unit
+        onResponse: (String) -> Unit,
+        task: AITask = AITask.FOLLOWUP_NO_RESPONSE
     ) {
-        val currentModel = getInitializedModel() ?: run {
+        val currentModel = getInitializedModel(task) ?: run {
             Log.e(TAG, "generateSubsequentResponse: GenerativeModel not initialized.")
             onResponse("(Error: AI not ready for subsequent response)")
             return
@@ -151,9 +168,10 @@ class AIInteractionManager(
     }
 
     fun generateResponse(
-        onResponse: (String) -> Unit
+        onResponse: (String) -> Unit,
+        task: AITask = AITask.FIRST_MESSAGE
     ) {
-        val currentModel = getInitializedModel() ?: run {
+        val currentModel = getInitializedModel(task) ?: run {
             onResponse("(Error: AI not initialized - Model unavailable)")
             return
         }

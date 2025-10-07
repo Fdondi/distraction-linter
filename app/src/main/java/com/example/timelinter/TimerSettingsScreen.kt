@@ -13,7 +13,6 @@ import androidx.compose.ui.unit.dp
 /**
  * Dedicated screen for configuring all timer-related settings. Extracted from the old SettingsScreen.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimerSettingsScreen(
     onNavigateBack: () -> Unit
@@ -28,8 +27,8 @@ fun TimerSettingsScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Timer Settings") },
+            com.example.timelinter.ui.components.AppTopBar(
+                title = "Timer Settings",
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

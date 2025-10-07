@@ -296,7 +296,6 @@ class AppUsageMonitorService : Service() {
     private fun handleObservingState(appInfo: AppInfo?) {
         // Step 0-1 from interaction.md
         
-        val appInfo = appInfo ?: getCurrentAppUsage()
         val isWasteful = appInfo?.isWasteful == true
         val isAllowed = if (appInfo != null) interactionStateManager.isAllowed(appInfo.readableName) else false
         val remaining = bucketRemainingMs.get()
@@ -316,8 +315,8 @@ class AppUsageMonitorService : Service() {
         
         interactionStateManager.startConversation()
         
-        // Step 2: Send to AI and get initial response
-        generateAIResponse(appInfo)
+        // Step 2: Send to AI and get initial response (FIRST_MESSAGE)
+        generateAIResponse(appInfo, AITask.FIRST_MESSAGE)
     }
 
     private fun handleConversationActiveState(appInfo: AppInfo?) {
@@ -360,13 +359,13 @@ class AppUsageMonitorService : Service() {
             // Continue conversation
             interactionStateManager.continueConversation()
             
-            // Step 7: Go to step 2 - send to AI again
-            generateAIResponse(appInfo)
+            // Step 7: Go to step 2 - send to AI again (FOLLOWUP_NO_RESPONSE)
+            generateAIResponse(appInfo, AITask.FOLLOWUP_NO_RESPONSE)
         }
     }
 
-    private fun generateAIResponse(appInfo: AppInfo?) {
-        val currentModel = aiManager.getInitializedModel()
+    private fun generateAIResponse(appInfo: AppInfo?, task: AITask) {
+        val currentModel = aiManager.getInitializedModel(task)
         if (currentModel == null) {
             Log.e(TAG, "Cannot generate AI response: Model not initialized")
             return
@@ -375,7 +374,7 @@ class AppUsageMonitorService : Service() {
         serviceScope.launch {
             try {
                 val apiContents = conversationHistoryManager.getHistoryForAPI()
-                Log.d(TAG, "Sending to AI. History size: ${apiContents.size}")
+                Log.d(TAG, "Sending to AI using task: ${task.displayName}. History size: ${apiContents.size}")
 
                 val response = currentModel.generateContent(*apiContents.toTypedArray())
                 // Function-calling only: parse structured calls and model text
@@ -472,9 +471,9 @@ class AppUsageMonitorService : Service() {
                 conversationHistoryManager.addUserMessage(replyText, appName, sessionMs, dailyMs)
                 interactionStateManager.continueConversation()
                 
-                // Step 7: Go to step 2 - send to AI
+                // Step 7: Go to step 2 - send to AI (USER_RESPONSE)
                 val currentAppInfo = getCurrentAppUsage()
-                generateAIResponse(currentAppInfo)
+                generateAIResponse(currentAppInfo, AITask.USER_RESPONSE)
 
             } else { 
                 Log.w(TAG, "Received empty reply.") 
@@ -714,18 +713,22 @@ class AppUsageMonitorService : Service() {
 
         // Build contents for a one-off generation using the updated API history
         val contents = conversationHistoryManager.getHistoryForAPI()
-        aiManager.generateFromContents(contents) { responseText ->
-            if (!responseText.isNullOrBlank()) {
-                val trimmed = responseText.trim()
-                if (!trimmed.equals("No new memory", ignoreCase = true)) {
-                    AIMemoryManager.addPermanentMemory(this, trimmed)
-                    // Update memory shown in log screen
-                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
+        aiManager.generateFromContents(
+            contents = contents,
+            onResponse = { responseText ->
+                if (!responseText.isNullOrBlank()) {
+                    val trimmed = responseText.trim()
+                    if (!trimmed.equals("No new memory", ignoreCase = true)) {
+                        AIMemoryManager.addPermanentMemory(this, trimmed)
+                        // Update memory shown in log screen
+                        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
+                    }
                 }
-            }
-            // Finally clear histories for a new session
-            conversationHistoryManager.clearHistories()
-        }
+                // Finally clear histories for a new session
+                conversationHistoryManager.clearHistories()
+            },
+            task = AITask.SUMMARY // Use SUMMARY model for archival/summary
+        )
     }
 
     private fun isWastefulApp(packageName: String): Boolean {
