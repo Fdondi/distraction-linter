@@ -18,3 +18,6 @@ local.properties
 .idea/inspectionProfiles/
 .kotlin/
 .cursor/rules/
+
+# AI scratchpad
+app/docs/
