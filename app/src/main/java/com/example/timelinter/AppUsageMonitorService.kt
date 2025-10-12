@@ -63,7 +63,7 @@ class AppUsageMonitorService : Service() {
     private val dailyStartTime = AtomicLong(getStartOfDay())
     private val sessionWastedTime = AtomicLong(0)
     private val dailyWastedTime = AtomicLong(0)
-    private var currentApp: String? = null
+    private var currentApp: String = ""
     private var lastAppChangeTime = AtomicLong(System.currentTimeMillis())
 
     // Token bucket threshold tracking
@@ -226,7 +226,7 @@ class AppUsageMonitorService : Service() {
                         Log.i(TAG, "Screen turned off; stopping monitoring tasks and clearing current app")
                         if (isMonitoringScheduled) stopMonitoringTasks("screen off")
                         // Clear current app so that next unlock doesn't reuse stale context
-                        currentApp = null
+                        currentApp = ""
                         // Reset interaction state to observing to avoid mid-conversation surprises
                         interactionStateManager.resetToObserving()
                         // Cancel any in-flight conversation notification
@@ -496,7 +496,7 @@ class AppUsageMonitorService : Service() {
     )
 
     private fun getAppInfoFromCurrentApp(): AppInfo? {
-        val pkg = currentApp ?: return null
+        val pkg = currentApp.takeIf { it.isNotEmpty() } ?: return null
         return if (pkg.startsWith("web:")) {
             val host = pkg.removePrefix("web:")
             val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
@@ -673,24 +673,30 @@ class AppUsageMonitorService : Service() {
         // App change detection and time accumulation logic
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
-             EventLogStore.logAppChanged(currentApp, detectedApp)
+             
+             // Only log meaningful transitions (not "None → None")
+             val previousApp = if (currentApp.isNotEmpty()) currentApp else "None"
+             val newApp = if (detectedApp.isNotEmpty()) detectedApp else "None"
+             if (previousApp != newApp) {
+                 EventLogStore.logAppChanged(currentApp, detectedApp)
+             }
              
              // Add time spent on previous app IF IT WAS WASTEFUL
-             currentApp?.let { app ->
-                 if (isWastefulApp(app)) {
+             if (currentApp.isNotEmpty()) {
+                 if (isWastefulApp(currentApp)) {
                      val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
                      if (timeSpent < TimeUnit.MINUTES.toMillis(5)) { 
                          sessionWastedTime.addAndGet(timeSpent)
                          dailyWastedTime.addAndGet(timeSpent)
-                         Log.d(TAG, "Added $timeSpent ms to wasteful time (previous app: $app)")
+                         Log.d(TAG, "Added $timeSpent ms to wasteful time (previous app: $currentApp)")
                      } else {
-                          Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for previous app: $app")
+                          Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for previous app: $currentApp")
                      }
                  }
              }
 
             // Update currentApp; if detection is empty, clear current app
-            currentApp = if (detectedApp.isNotEmpty()) detectedApp else null
+            currentApp = detectedApp
              lastAppChangeTime.set(System.currentTimeMillis())
 
              // Reset session timer ONLY when a *new* wasteful app starts
@@ -848,9 +854,11 @@ class AppUsageMonitorService : Service() {
 
     private fun createStatsNotification(): android.app.Notification {
         val monitoringStatus = "Monitoring: Active"
-        val currentAppName = currentApp?.let { app ->
-            if (isWastefulApp(app)) getReadableAppName(app) else "No distracting app active"
-        } ?: "No distracting app active"
+        val currentAppName = if (currentApp.isNotEmpty()) {
+            if (isWastefulApp(currentApp)) getReadableAppName(currentApp) else "No distracting app active"
+        } else {
+            "No distracting app active"
+        }
         val maxThresholdMs = TimeUnit.MINUTES.toMillis(
             SettingsManager.getMaxThresholdMinutes(this).toLong()
         )
@@ -862,14 +870,12 @@ class AppUsageMonitorService : Service() {
         }
         
         // Calculate current app time when on a wasteful app
-        val currentAppTime = currentApp?.let { app ->
-            if (isWastefulApp(app)) {
-                val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
-                if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
-                    "Current App Time: ${formatDuration(timeSpent)}"
-                } else null
+        val currentAppTime = if (currentApp.isNotEmpty() && isWastefulApp(currentApp)) {
+            val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
+            if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
+                "Current App Time: ${formatDuration(timeSpent)}"
             } else null
-        }
+        } else null
         
         Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms")
         
