@@ -89,6 +89,11 @@ Memory and Settings
   - Documents the memory retrieval flow and common misconceptions
   - See this first if you have questions about memory usage
 
+- app/docs/NO_MAGIC_STRINGS.md
+  - Policy document explaining why we use function calls instead of magic strings
+  - Case studies showing before/after examples
+  - Guidelines for when strings are acceptable vs when function calls are required
+
 - app/src/main/java/com/example/timelinter/AIMemoryManager.kt
   - Storage in `SharedPreferences`:
     - Permanent: newline‑joined text under `permanent_memory` with set/get/append APIs.

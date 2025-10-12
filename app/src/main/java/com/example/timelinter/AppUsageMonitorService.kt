@@ -724,7 +724,7 @@ class AppUsageMonitorService : Service() {
 
         val appName = appInfo?.readableName ?: "Unknown App"
         // Add API-only user message asking for memory suggestions
-        val prompt = "This conversation is to be archived. Is there anything worth remembering that wasn't already in the AI memory at the beginning of this conversation? Respond with concise bullet points or 'No new memory'."
+        val prompt = "This conversation is to be archived. If there's anything worth remembering that wasn't already in the AI memory at the beginning of this conversation, call remember(content) with each important fact. If there's nothing new to remember, simply acknowledge without calling any function."
         conversationHistoryManager.addApiOnlyUserMessage(
             messageText = prompt,
             currentAppName = appName,
@@ -738,12 +738,24 @@ class AppUsageMonitorService : Service() {
             contents = contents,
             onResponse = { responseText ->
                 if (!responseText.isNullOrBlank()) {
-                    val trimmed = responseText.trim()
-                    if (!trimmed.equals("No new memory", ignoreCase = true)) {
-                        AIMemoryManager.addPermanentMemory(this, trimmed)
-                        // Update memory shown in log screen
-                        ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
+                    // Parse response for function calls
+                    val parsedResponse = parseAIResponse(responseText)
+                    
+                    // Process any remember() function calls
+                    for (tool in parsedResponse.tools) {
+                        if (tool is ToolCommand.Remember) {
+                            val durationMinutes = tool.durationMinutes
+                            if (durationMinutes != null) {
+                                AIMemoryManager.addTemporaryMemory(this, tool.content, durationMinutes)
+                            } else {
+                                AIMemoryManager.addPermanentMemory(this, tool.content)
+                            }
+                            Log.i(TAG, "Archived memory from conversation: ${tool.content}")
+                        }
                     }
+                    
+                    // Update memory shown in log screen
+                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
                 }
                 // Finally clear histories for a new session
                 conversationHistoryManager.clearHistories()

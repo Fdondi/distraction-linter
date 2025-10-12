@@ -120,6 +120,24 @@ val expiredMemories = AIMemoryManager.getAllMemories(context)
 assertFalse(expiredMemories.contains("User on vacation"))
 ```
 
+## Archive Feature
+
+When a conversation ends (e.g., due to an `allow()` command), the system asks the AI:
+> "If there's anything worth remembering that wasn't already in the AI memory at the beginning of this conversation, call remember(content) with each important fact."
+
+**Key Points**:
+- ✅ Uses proper function calls (`remember()`) - NO magic strings
+- ✅ AI can call `remember()` multiple times if needed
+- ✅ AI can call `remember(content, minutes)` for temporary memories
+- ✅ If nothing new, AI simply acknowledges without calling any function
+- ❌ **NEVER** checks for magic strings like "No new memory"
+
+**Deterministic Signal**: 
+- Function call present = Save memory
+- No function call = Don't save memory
+
+See: `AppUsageMonitorService.kt` lines 725-765
+
 ## Conclusion
 
 - ✅ Temporary memory IS used - it's retrieved and sent to the AI
@@ -127,4 +145,5 @@ assertFalse(expiredMemories.contains("User on vacation"))
 - ✅ The problem was the AI wasn't instructed clearly on WHEN to use it
 - ✅ Fixed by improving `ai_memory_rules.txt` with clear examples
 - ✅ Fixed by correcting test examples to demonstrate proper usage
+- ✅ Archive feature uses proper function calls instead of magic strings
 
