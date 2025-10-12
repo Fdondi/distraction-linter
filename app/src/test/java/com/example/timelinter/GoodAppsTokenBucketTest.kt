@@ -366,10 +366,11 @@ class GoodAppsTokenBucketTest {
             config = config
         )
 
-        // Should remain overfilled (with normal replenishment)
-        // 1 hour = 12 replenishments of 1 min = +12 min
-        // 15 + 12 = 27, capped at 35 (5 + 30)
-        assertEquals(min(27), result.newRemainingMs)
+        // Should remain overfilled (no normal replenishment since already above max, no decay)
+        // Normal replenishment doesn't apply when above max
+        // Decay is 0, so no decay happens
+        // Expected: stays at 15
+        assertEquals(min(15), result.newRemainingMs)
     }
 
     @Test

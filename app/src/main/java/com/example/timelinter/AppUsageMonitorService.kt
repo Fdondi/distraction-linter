@@ -30,6 +30,7 @@ import android.app.KeyguardManager
 import android.content.pm.PackageManager
 import android.content.Intent.ACTION_MAIN
 import android.content.Intent.CATEGORY_HOME
+import com.google.ai.client.generativeai.type.GenerateContentResponse
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -748,9 +749,10 @@ class AppUsageMonitorService : Service() {
 
         // Build contents for a one-off generation using the updated API history
         val contents = conversationHistoryManager.getHistoryForAPI()
+        val context = this
         aiManager.generateFromContents(
             contents = contents,
-            onResponse = { response ->
+            onResponse = fun(response: GenerateContentResponse?) {
                 if (response != null) {
                     // Parse response for function calls
                     val parsedResponse = GeminiFunctionCallParser.parse(response)
@@ -760,16 +762,16 @@ class AppUsageMonitorService : Service() {
                         if (tool is ToolCommand.Remember) {
                             val durationMinutes = tool.durationMinutes
                             if (durationMinutes != null) {
-                                AIMemoryManager.addTemporaryMemory(this, tool.content, durationMinutes)
+                                AIMemoryManager.addTemporaryMemory(context, tool.content, durationMinutes)
                             } else {
-                                AIMemoryManager.addPermanentMemory(this, tool.content)
+                                AIMemoryManager.addPermanentMemory(context, tool.content)
                             }
                             Log.i(TAG, "Archived memory from conversation: ${tool.content}")
                         }
                     }
                     
                     // Update memory shown in log screen
-                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(this))
+                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
                 }
                 // Finally clear histories for a new session
                 conversationHistoryManager.clearHistories()
@@ -877,6 +879,17 @@ class AppUsageMonitorService : Service() {
             "Bucket: full"
         }
         
+        // Bonus bucket (good app accumulator) text
+        val goodAppAccumulated = bucketGoodAppAccumulatedMs.get()
+        val goodAppRewardIntervalMs = TimeUnit.MINUTES.toMillis(
+            SettingsManager.getGoodAppRewardIntervalMinutes(this).toLong()
+        )
+        val bonusBucketText = if (goodAppAccumulated > 0L && goodAppRewardIntervalMs > 0L) {
+            "Bonus: ${formatDuration(goodAppAccumulated)} / ${formatDuration(goodAppRewardIntervalMs)}"
+        } else {
+            null
+        }
+        
         // Calculate current app time when on a wasteful app
         val currentAppTime = if (currentApp.isNotEmpty() && isWastefulApp(currentApp)) {
             val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
@@ -885,7 +898,7 @@ class AppUsageMonitorService : Service() {
             } else null
         } else null
         
-        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms")
+        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms, Bonus: ${goodAppAccumulated}ms")
         
         // Build notification text with current app time when bucket is full
         val notificationText = buildString {
@@ -897,6 +910,9 @@ class AppUsageMonitorService : Service() {
             appendLine("Session Time: ${formatDuration(sessionWastedTime.get())}")
             appendLine("Daily Time: ${formatDuration(dailyWastedTime.get())}")
             appendLine(bucketText)
+            if (bonusBucketText != null) {
+                appendLine(bonusBucketText)
+            }
         }
         
         val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)

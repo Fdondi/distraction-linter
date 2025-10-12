@@ -48,21 +48,23 @@ object TokenBucket {
             // Consume time from bucket (including any overfill)
             remaining -= delta
         } else {
-            // Not wasteful - accumulate for normal replenishment
+            // Not wasteful - accumulate for normal replenishment (only applies when below max)
             accumulated += delta
             if (config.replenishIntervalMs > 0L && config.replenishAmountMs > 0L) {
                 val replenishmentsPossible = accumulated / config.replenishIntervalMs
                 if (replenishmentsPossible > 0) {
-                    // Normal replenish cannot raise above base max
-                    remaining = minOf(
-                        config.maxThresholdMs,
-                        remaining + replenishmentsPossible * config.replenishAmountMs
-                    )
                     accumulated %= config.replenishIntervalMs
+                    // Normal replenishment only helps when below max threshold
+                    if (remaining < config.maxThresholdMs) {
+                        remaining = minOf(
+                            config.maxThresholdMs,
+                            remaining + replenishmentsPossible * config.replenishAmountMs
+                        )
+                    }
                 }
             }
 
-            // If using a good app, accumulate for rewards
+            // If using a good app, give bonus rewards (can go above max)
             if (isCurrentlyGoodApp && config.goodAppRewardIntervalMs > 0L && config.goodAppRewardAmountMs > 0L) {
                 goodAppAccumulated += delta
                 val rewardsPossible = goodAppAccumulated / config.goodAppRewardIntervalMs
@@ -70,16 +72,16 @@ object TokenBucket {
                     remaining += rewardsPossible * config.goodAppRewardAmountMs
                     goodAppAccumulated %= config.goodAppRewardIntervalMs
                 }
-            }
-
-            // Apply decay to overfill portion
-            if (config.overfillDecayPerHourMs > 0L && config.maxOverfillMs > 0L) {
-                val overfillAmount = maxOf(0L, remaining - config.maxThresholdMs)
-                if (overfillAmount > 0L) {
-                    val hoursElapsed = delta.toDouble() / TimeUnit.HOURS.toMillis(1)
-                    val decayAmount = (config.overfillDecayPerHourMs * hoursElapsed).toLong()
-                    val actualDecay = minOf(decayAmount, overfillAmount)
-                    remaining -= actualDecay
+            } else {
+                // Overfill decays over time when NOT using a good app (gets smaller until used up)
+                if (config.overfillDecayPerHourMs > 0L) {
+                    val overfillAmount = maxOf(0L, remaining - config.maxThresholdMs)
+                    if (overfillAmount > 0L) {
+                        val hoursElapsed = delta.toDouble() / TimeUnit.HOURS.toMillis(1)
+                        val decayAmount = (config.overfillDecayPerHourMs * hoursElapsed).toLong()
+                        val actualDecay = minOf(decayAmount, overfillAmount)
+                        remaining -= actualDecay
+                    }
                 }
             }
         }
@@ -106,4 +108,6 @@ object TriggerDecider {
         return isWasteful && !isAllowed && remainingMs <= 0L
     }
 }
+
+
 
