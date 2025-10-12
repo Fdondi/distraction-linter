@@ -122,10 +122,18 @@ class APIConversationHistory(
             "Currently on $appName"
         }
         
+        // Format good apps info for automated data
+        val appNames = GoodAppManager.getSelectedAppDisplayNames(context)
+        val automatedData = if (appNames != null && appNames.isNotEmpty()) {
+            "Good apps to suggest instead of wasteful ones: ${appNames.joinToString(", ")}"
+        } else {
+            ""
+        }
+        
         val userStatusMessage = userInfoTemplate
             .replace("{{FIXED_USER_PROMPT}}", "User is currently using time-wasting apps")
             .replace("{{CURRENT_USER_PROMPT}}", currentUserPrompt)
-            .replace("{{AUTOMATED_DATA}}", "")
+            .replace("{{AUTOMATED_DATA}}", automatedData)
         
         // Decorate with app statistics like regular user messages
         val decoratedUserStatus = userInteractionTemplate

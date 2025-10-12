@@ -74,6 +74,10 @@ AI and Conversation
     1) System prompt
     2) AI Memory message using `AIMemoryManager.getAllMemories()` and `ai_memory_template`
     3) User status message (`user_info_template` + `gemini_user_template`)
+  - Includes good apps list in AI initialization (AUTOMATED_DATA section):
+    - Automatically fetches good apps from `GoodAppManager` during session start
+    - Adds to system context as "Good apps to suggest instead of wasteful ones: [names]"
+    - Omits entirely when no good apps configured
   - Publishes API history snapshots to `ConversationLogStore` and adds session separators.
 
 - app/src/main/java/com/example/timelinter/ConversationLogStore.kt
@@ -132,6 +136,8 @@ Wasteful Apps, Good Apps, and Token Bucket
 
 - app/src/main/java/com/example/timelinter/GoodAppManager.kt
   - Tracks selected apps considered beneficial (good apps); provides time rewards.
+  - Caches display names in SharedPreferences to avoid repeated PackageManager lookups.
+  - `getSelectedAppDisplayNames()` returns nullable List<String>: null if no apps configured, empty if all uninstalled.
   - Similar structure to TimeWasterAppManager but for rewarding good behavior.
 
 - app/src/main/java/com/example/timelinter/TokenBucket.kt
@@ -193,6 +199,8 @@ Tests
   - `AIMemoryRulesAndTempUITest.kt` – rules editor and temp grouping in UI
   - `FakeTimeProvider.kt`, `TimeFlowsTest.kt`
   - `GoodAppsIntegrationTest.kt` – full integration tests for good apps (manager, settings, bucket)
+  - `GoodAppsAIContextTest.kt` – tests that good apps list is included in AI initialization (not repeated in each message)
+  - `GoodAppManagerCacheTest.kt` – tests display name caching and nullability behavior
 
 Event Log
 - app/src/main/java/com/example/timelinter/EventLogStore.kt
