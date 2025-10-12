@@ -79,20 +79,20 @@ class AIInteractionManager(
     // Generate a response from explicitly provided contents (bypasses pulling from history)
     fun generateFromContents(
         contents: List<com.google.ai.client.generativeai.type.Content>,
-        onResponse: (String) -> Unit,
+        onResponse: (GenerateContentResponse?) -> Unit,
         task: AITask = currentTask
     ) {
         val currentModel = getInitializedModel(task) ?: run {
-            onResponse("(Error: AI not initialized - Model unavailable)")
+            onResponse(null)
             return
         }
         serviceScope.launch {
             try {
                 val response = currentModel.generateContent(*contents.toTypedArray())
-                onResponse(response.text ?: "")
+                onResponse(response)
             } catch (e: Exception) {
                 Log.e(TAG, "Error calling AI API (custom contents)", e)
-                onResponse("")
+                onResponse(null)
             }
         }
     }

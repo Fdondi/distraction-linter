@@ -39,6 +39,10 @@ Background Services and Flow
     - `ConversationHistoryManager` (system prompt, memory, user templates)
     - `AIInteractionManager` (Gemini model + calls)
   - Responds to tool commands (Allow/Remember) and updates storage (`AIMemoryManager`) and UI store (`ConversationLogStore`).
+  - Screen lock/unlock handling:
+    - Stops monitoring when screen turns off to avoid stale context
+    - On unlock (ACTION_USER_PRESENT, ACTION_SCREEN_ON, ACTION_USER_UNLOCKED): immediately runs `mainInteractionLoop()` to check current app and refill bucket based on time passed
+    - TokenBucket automatically accounts for time gaps, refilling based on elapsed time during unlock
   - Good Apps integration:
     - Tracks `bucketGoodAppAccumulatedMs` for reward accumulation
     - Passes `isCurrentlyGoodApp` to TokenBucket.update()
@@ -200,6 +204,8 @@ Tests
   - `AIMemorySimpleTest.kt`, `AIMemoryScenarioTest.kt` – memory behaviors
   - `TokenBucketTest.kt` – token bucket logic (basic)
   - `GoodAppsTokenBucketTest.kt` – comprehensive tests for good apps feature (overfill, decay, rewards)
+  - `ScreenUnlockBehaviorTest.kt` – tests bucket refill after time gaps (simulating phone lock/unlock)
+  - `TextResponseParser.kt` – test helper for parsing text-based function calls without GenerateContentResponse
   - `CoachNameUnitTest.kt`, `ApiKeyManagerCoachNameTest.kt`
 
 - Instrumented Tests – app/src/androidTest/java/com/example/timelinter/

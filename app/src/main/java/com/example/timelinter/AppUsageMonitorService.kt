@@ -237,6 +237,14 @@ class AppUsageMonitorService : Service() {
                         if (!isDeviceLockedOrScreenOff()) {
                             Log.i(TAG, "User present/screen on; attempting to start monitoring")
                             startMonitoring()
+                            // Immediately check current app and refill bucket based on time passed
+                            // This ensures we don't wait up to checkIntervalSeconds before first check
+                            try {
+                                Log.d(TAG, "Running immediate check after unlock")
+                                mainInteractionLoop()
+                            } catch (t: Throwable) {
+                                Log.e(TAG, "Error during immediate unlock check", t)
+                            }
                         } else {
                             Log.v(TAG, "Received ${action} but device still locked or screen off; not starting")
                         }
@@ -742,10 +750,10 @@ class AppUsageMonitorService : Service() {
         val contents = conversationHistoryManager.getHistoryForAPI()
         aiManager.generateFromContents(
             contents = contents,
-            onResponse = { responseText ->
-                if (!responseText.isNullOrBlank()) {
+            onResponse = { response ->
+                if (response != null) {
                     // Parse response for function calls
-                    val parsedResponse = parseAIResponse(responseText)
+                    val parsedResponse = GeminiFunctionCallParser.parse(response)
                     
                     // Process any remember() function calls
                     for (tool in parsedResponse.tools) {
