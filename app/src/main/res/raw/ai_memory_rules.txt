@@ -1,8 +1,19 @@
 When to save AI memory (guidelines):
-- Save user preferences that matter across sessions (e.g., goals, constraints).
-- Save temporary context only if it helps the next session; set a duration.
-- Avoid saving redundant/obvious facts or volatile data.
-- Keep each memory concise and factual, one idea per line.
+
+USE TEMPORARY MEMORY (with duration in minutes) for:
+- Temporary situations: "working temporarily", "on vacation", "sick today", "guest at home"
+- Current context: "currently focused on X", "taking a break", "in a meeting"
+- Short-term plans: "deadline this week", "project due Friday"
+- Time-bound goals: "trying to avoid X today", "focusing on Y this afternoon"
+
+USE PERMANENT MEMORY (no duration) for:
+- Persistent preferences: "prefers working in morning", "doesn't like interruptions"
+- Long-term goals: "wants to learn programming", "building a business"
+- User characteristics: "works from home", "has kids", "studies at night"
+- Lasting constraints: "can't use phone at work", "meditation every morning"
+
+IMPORTANT: If the content mentions "temporarily", "currently", "today", "this week" → USE TEMPORARY with appropriate duration!
+Example: "User working for Google temporarily" → remember("...", 10080) [7 days in minutes]
 
 Format for remember(content, minutes?):
 - Permanent: remember("<content>")

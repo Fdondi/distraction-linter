@@ -36,8 +36,8 @@ class AIMemoryInstrumentedTest {
 
     @Test
     fun testPermanentMemoryStorageAndRetrieval() {
-        // Test the exact scenario from the user's image
-        val memoryContent = "User is working for Google temporarily and wants to make a good impression."
+        // Test permanent memory storage - use a truly permanent fact
+        val memoryContent = "User wants to make a good impression at work."
         
         // When - Add permanent memory
         AIMemoryManager.addPermanentMemory(appContext, memoryContent)
@@ -50,7 +50,7 @@ class AIMemoryInstrumentedTest {
     @Test
     fun testMultiplePermanentMemories() {
         // Test multiple permanent memories
-        val memory1 = "User is working for Google temporarily and wants to make a good impression."
+        val memory1 = "User wants to make a good impression at work."
         val memory2 = "User prefers working in the morning."
         
         // When - Add multiple memories
@@ -87,7 +87,7 @@ class AIMemoryInstrumentedTest {
     @Test
     fun testMixedPermanentAndTemporaryMemories() {
         // Test both permanent and temporary memories together
-        val permanentMemory = "User is working for Google temporarily and wants to make a good impression."
+        val permanentMemory = "User wants to make a good impression at work."
         val tempMemory = "User is currently focused on YouTube"
         
         // When - Add both types
@@ -111,7 +111,7 @@ class AIMemoryInstrumentedTest {
     @Test
     fun testMemoryFormatForAITemplate() {
         // Test that memory format works correctly with AI memory template
-        val memoryContent = "User is working for Google temporarily and wants to make a good impression."
+        val memoryContent = "User wants to make a good impression at work."
         
         // When - Add memory and get it formatted
         AIMemoryManager.addPermanentMemory(appContext, memoryContent)
@@ -141,8 +141,9 @@ class AIMemoryInstrumentedTest {
     @Test
     fun testToolCommandRememberProcessing() {
         // Test the exact ToolCommand.Remember processing from the user's scenario
+        // Note: "temporarily" should use temporary memory with a duration
         val rememberCommand = ToolCommand.Remember(
-            content = "User is working for Google temporarily and wants to make a good impression.",
+            content = "User is working for Google and wants to make a good impression.",
             durationMinutes = null // null means permanent
         )
         
@@ -166,7 +167,7 @@ class AIMemoryInstrumentedTest {
     @Test
     fun testMemoryPersistenceAcrossAppRestarts() {
         // Test that memory persists across app restarts (simulated by clearing and re-adding)
-        val memoryContent = "User is working for Google temporarily and wants to make a good impression."
+        val memoryContent = "User wants to make a good impression at work."
         
         // When - Add memory
         AIMemoryManager.addPermanentMemory(appContext, memoryContent)
@@ -251,6 +252,29 @@ class AIMemoryInstrumentedTest {
     }
 
     @Test
+    fun testTemporarySituationMemoryShouldUseTemporaryMemory() {
+        // Test that temporary situations like "working temporarily" should use temporary memory
+        // This demonstrates the CORRECT usage pattern
+        val temporaryJobMemory = "User is working for Google temporarily and wants to make a good impression."
+        val durationInDays = 7 // Working temporarily at Google for 1 week
+        val durationInMinutes = durationInDays * 24 * 60 // Convert to minutes
+        
+        // When - Add as TEMPORARY memory (correct approach for temporary situations)
+        AIMemoryManager.addTemporaryMemory(appContext, temporaryJobMemory, durationInMinutes, fakeTime)
+        
+        // Then - Verify it's present initially
+        val initialMemories = AIMemoryManager.getAllMemories(appContext, fakeTime)
+        assertTrue("Temporary job memory should be present", initialMemories.contains(temporaryJobMemory))
+        
+        // Advance time beyond the temporary job duration
+        fakeTime.advanceMinutes(durationInMinutes + 1)
+        
+        // Verify it's expired and cleaned up
+        val expiredMemories = AIMemoryManager.getAllMemories(appContext, fakeTime)
+        assertFalse("Temporary job memory should expire after the duration", expiredMemories.contains(temporaryJobMemory))
+    }
+
+    @Test
     fun testMemoryIntegrationWithConversationFlow() {
         // Test the complete flow from the user's scenario
         // 1. AI responds with remember() and allow() commands
@@ -259,9 +283,9 @@ class AIMemoryInstrumentedTest {
         // 4. Next conversation should include the memory
         
         val parsedResponse = ParsedResponse(
-            userMessage = "Oh, looks like you're still in the zone! No worries at all, just wanted to check in again and see if you're feeling good about your flow, especially with that Google impression in mind.",
+            userMessage = "Oh, looks like you're still in the zone! No worries at all, just wanted to check in again and see if you're feeling good about your flow, especially with that work goal in mind.",
             tools = listOf(
-                ToolCommand.Remember("User is working for Google temporarily and wants to make a good impression.", null),
+                ToolCommand.Remember("User wants to make a good impression at work.", null),
                 ToolCommand.Allow(15, "YouTube")
             )
         )
@@ -287,12 +311,12 @@ class AIMemoryInstrumentedTest {
         
         // Then - Verify memory was stored and can be retrieved for next conversation
         val memoriesForNextConversation = AIMemoryManager.getAllMemories(appContext, fakeTime)
-        assertEquals("Memory should be available for next conversation", "User is working for Google temporarily and wants to make a good impression.", memoriesForNextConversation)
+        assertEquals("Memory should be available for next conversation", "User wants to make a good impression at work.", memoriesForNextConversation)
         
         // Verify AI template integration
         val aiMemoryTemplate = "Previous memories:\n{{AI_MEMORY}}"
         val memoryMessage = aiMemoryTemplate.replace("{{AI_MEMORY}}", memoriesForNextConversation)
-        val expectedMemoryMessage = "Previous memories:\nUser is working for Google temporarily and wants to make a good impression."
+        val expectedMemoryMessage = "Previous memories:\nUser wants to make a good impression at work."
         assertEquals("Memory should format correctly for AI", expectedMemoryMessage, memoryMessage)
     }
 }

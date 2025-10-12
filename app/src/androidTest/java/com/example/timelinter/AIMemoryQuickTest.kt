@@ -78,7 +78,7 @@ class AIMemoryQuickTest {
     fun testToolCommandRememberProcessing() {
         // Test the ToolCommand.Remember processing
         val rememberCommand = ToolCommand.Remember(
-            content = "User is working for Google temporarily and wants to make a good impression.",
+            content = "User wants to make a good impression at work.",
             durationMinutes = null // null means permanent
         )
         

@@ -84,6 +84,11 @@ AI and Conversation
   - `StateFlow` store observed by UI: `apiHistory` and `aiMemory`.
 
 Memory and Settings
+- app/docs/MEMORY_USAGE_GUIDE.md
+  - Comprehensive guide explaining when to use temporary vs permanent memory
+  - Documents the memory retrieval flow and common misconceptions
+  - See this first if you have questions about memory usage
+
 - app/src/main/java/com/example/timelinter/AIMemoryManager.kt
   - Storage in `SharedPreferences`:
     - Permanent: newline‑joined text under `permanent_memory` with set/get/append APIs.
