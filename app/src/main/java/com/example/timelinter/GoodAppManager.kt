@@ -14,6 +14,7 @@ object GoodAppManager {
     private const val PREF_NAME = "good_apps"
     private const val SELECTED_APPS_KEY = "selected_apps"
     private const val APP_NAMES_KEY = "app_display_names"
+    private const val APP_EXPLANATIONS_KEY = "app_explanations"
     private const val TAG = "GoodAppManager"
 
     private fun getPreferences(context: Context): SharedPreferences {
@@ -66,7 +67,8 @@ object GoodAppManager {
             try {
                 val namesMap = JSONObject(namesJson)
                 return selectedPackages.mapNotNull { pkg ->
-                    namesMap.optString(pkg, null)
+                    val name = namesMap.optString(pkg, "")
+                    if (name.isNotEmpty()) name else null
                 }.sorted()
             } catch (e: Exception) {
                 Log.w(TAG, "Error parsing cached display names", e)
@@ -93,6 +95,72 @@ object GoodAppManager {
 
     fun isGoodApp(context: Context, packageName: String): Boolean {
         return getSelectedApps(context).contains(packageName)
+    }
+
+    /**
+     * Save explanation for why an app is good
+     */
+    fun saveExplanation(context: Context, packageName: String, explanation: String) {
+        val prefs = getPreferences(context)
+        val explanationsJson = prefs.getString(APP_EXPLANATIONS_KEY, null)
+        
+        val explanations = try {
+            if (explanationsJson != null) JSONObject(explanationsJson) else JSONObject()
+        } catch (e: Exception) {
+            JSONObject()
+        }
+        
+        if (explanation.isNotEmpty()) {
+            explanations.put(packageName, explanation)
+        } else {
+            explanations.remove(packageName)
+        }
+        
+        prefs.edit().putString(APP_EXPLANATIONS_KEY, explanations.toString()).apply()
+        Log.d(TAG, "Saved explanation for $packageName")
+    }
+
+    /**
+     * Get explanation for why an app is good
+     */
+    fun getExplanation(context: Context, packageName: String): String {
+        val prefs = getPreferences(context)
+        val explanationsJson = prefs.getString(APP_EXPLANATIONS_KEY, null) ?: return ""
+        
+        return try {
+            val explanations = JSONObject(explanationsJson)
+            explanations.optString(packageName, "")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error parsing explanations", e)
+            ""
+        }
+    }
+
+    /**
+     * Get all explanations as a map of app name to explanation
+     */
+    fun getAllExplanations(context: Context): Map<String, String> {
+        val prefs = getPreferences(context)
+        val explanationsJson = prefs.getString(APP_EXPLANATIONS_KEY, null) ?: return emptyMap()
+        val namesJson = prefs.getString(APP_NAMES_KEY, null)
+        
+        return try {
+            val explanations = JSONObject(explanationsJson)
+            val names = if (namesJson != null) JSONObject(namesJson) else JSONObject()
+            val result = mutableMapOf<String, String>()
+            
+            explanations.keys().forEach { pkg ->
+                val explanation = explanations.getString(pkg)
+                if (explanation.isNotEmpty()) {
+                    val appName = names.optString(pkg, pkg)
+                    result[appName] = explanation
+                }
+            }
+            result
+        } catch (e: Exception) {
+            Log.w(TAG, "Error parsing all explanations", e)
+            emptyMap()
+        }
     }
 }
 

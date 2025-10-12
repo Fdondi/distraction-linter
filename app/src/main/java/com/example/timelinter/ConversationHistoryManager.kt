@@ -124,11 +124,45 @@ class APIConversationHistory(
         
         // Format good apps info for automated data
         val appNames = GoodAppManager.getSelectedAppDisplayNames(context)
-        val automatedData = if (appNames != null && appNames.isNotEmpty()) {
-            "Good apps to suggest instead of wasteful ones: ${appNames.joinToString(", ")}"
-        } else {
-            ""
+        val goodAppExplanations = GoodAppManager.getAllExplanations(context)
+        val badAppExplanations = TimeWasterAppManager.getAllExplanations(context)
+        
+        val goodAppsInfo = buildString {
+            if (appNames != null && appNames.isNotEmpty()) {
+                appendLine("Good apps to suggest instead of wasteful ones:")
+                appNames.forEach { appName ->
+                    val explanation = goodAppExplanations[appName]
+                    if (explanation != null && explanation.isNotEmpty()) {
+                        appendLine("  - $appName: $explanation")
+                    } else {
+                        appendLine("  - $appName")
+                    }
+                }
+            }
         }
+        
+        val badAppsInfo = buildString {
+            if (badAppExplanations.isNotEmpty()) {
+                appendLine("Why these apps are considered wasteful:")
+                badAppExplanations.forEach { (pkg, explanation) ->
+                    if (explanation.isNotEmpty()) {
+                        // Try to get app name from package manager
+                        val displayName = try {
+                            context.packageManager.getApplicationLabel(
+                                context.packageManager.getApplicationInfo(pkg, 0)
+                            ).toString()
+                        } catch (e: Exception) {
+                            pkg
+                        }
+                        appendLine("  - $displayName: $explanation")
+                    }
+                }
+            }
+        }
+        
+        val automatedData = listOf(goodAppsInfo, badAppsInfo)
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
         
         val userStatusMessage = userInfoTemplate
             .replace("{{FIXED_USER_PROMPT}}", "User is currently using time-wasting apps")

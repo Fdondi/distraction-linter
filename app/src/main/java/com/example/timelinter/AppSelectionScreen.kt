@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -242,22 +244,56 @@ private fun AppListItem(
     isSelected: Boolean,
     onToggleSelection: (Boolean) -> Unit
 ) {
-    Row(
+    val context = LocalContext.current
+    var explanation by remember { mutableStateOf(TimeWasterAppManager.getExplanation(context, app.packageName)) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        Checkbox(
-            checked = isSelected,
-            onCheckedChange = onToggleSelection
-        )
-        Text(
-            text = app.appName,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = onToggleSelection
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = app.appName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (isSelected) {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                        contentDescription = if (expanded) "Collapse" else "Expand"
+                    )
+                }
+            }
+        }
+        
+        if (isSelected && expanded) {
+            OutlinedTextField(
+                value = explanation,
+                onValueChange = { newValue ->
+                    explanation = newValue
+                    TimeWasterAppManager.saveExplanation(context, app.packageName, newValue)
+                },
+                label = { Text("Why is this a bad app?") },
+                placeholder = { Text("e.g., Too distracting, wastes time, addiction...") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 48.dp, top = 8.dp, bottom = 8.dp),
+                minLines = 2,
+                maxLines = 4
+            )
+        }
     }
 } 

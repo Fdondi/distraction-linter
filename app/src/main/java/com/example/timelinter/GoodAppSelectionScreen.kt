@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -259,23 +261,57 @@ private fun GoodAppListItem(
     isSelected: Boolean,
     onToggleSelection: (Boolean) -> Unit
 ) {
-    Row(
+    val context = LocalContext.current
+    var explanation by remember { mutableStateOf(GoodAppManager.getExplanation(context, app.packageName)) }
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        Checkbox(
-            checked = isSelected,
-            onCheckedChange = onToggleSelection
-        )
-        Text(
-            text = app.appName,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = onToggleSelection
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = app.appName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (isSelected) {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (expanded) "Collapse" else "Expand"
+                    )
+                }
+            }
+        }
+        
+        if (isSelected && expanded) {
+            OutlinedTextField(
+                value = explanation,
+                onValueChange = { newValue ->
+                    explanation = newValue
+                    GoodAppManager.saveExplanation(context, app.packageName, newValue)
+                },
+                label = { Text("Why is this a good app?") },
+                placeholder = { Text("e.g., Helps with productivity, learning, exercise...") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 48.dp, top = 8.dp, bottom = 8.dp),
+                minLines = 2,
+                maxLines = 4
+            )
+        }
     }
 }
 
