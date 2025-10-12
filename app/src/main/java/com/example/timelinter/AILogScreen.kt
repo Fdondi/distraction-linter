@@ -12,9 +12,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 // Use fully qualified types to avoid import resolution issues in some environments
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun AILogScreen(
@@ -186,26 +189,34 @@ fun AILogScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     itemsIndexed(filtered) { index: Int, entry ->
-                        val headline = when (entry.type) {
-                            EventType.MESSAGE -> "${index + 1}. ${entry.title}"
-                            EventType.TOOL -> "${index + 1}. ${entry.title}"
-                            EventType.STATE -> "${index + 1}. ${entry.title}"
-                            EventType.APP -> "${index + 1}. ${entry.title}"
-                            EventType.BUCKET -> "${index + 1}. ${entry.title}"
-                            EventType.SYSTEM -> "${index + 1}. ${entry.title}"
+                        // Format timestamp for display
+                        val timestamp = remember(entry.timestamp) {
+                            val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                            formatter.format(Date(entry.timestamp))
                         }
+                        
                         ListItem(
                             headlineContent = {
                                 Text(
-                                    text = headline,
+                                    text = entry.title,
                                     style = MaterialTheme.typography.titleSmall
                                 )
                             },
                             overlineContent = {
-                                Text(
-                                    text = entry.type.name,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = entry.type.name,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                    Text(
+                                        text = timestamp,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
                             },
                             supportingContent = {
                                 val roleSuffix = entry.role?.let { " ($it)" } ?: ""
