@@ -58,7 +58,7 @@ class AIConfigIntegrationTest {
     fun testAIInteractionManagerUsesCustomConfiguration() {
         // Set custom configuration
         val customModel = AIModelConfig(
-            modelName = "gemini-2.5-flash",
+            id = "gemini-2.5-flash",
             displayName = "Gemini 2.5 Flash",
             provider = AIProvider.GOOGLE_AI
         )

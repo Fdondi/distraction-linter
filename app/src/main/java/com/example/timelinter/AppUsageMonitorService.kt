@@ -69,6 +69,7 @@ class AppUsageMonitorService : Service() {
     // Token bucket threshold tracking
     private val bucketRemainingMs = AtomicLong(0L)
     private val bucketAccumulatedNonWastefulMs = AtomicLong(0L) // New state for accumulator
+    private val bucketGoodAppAccumulatedMs = AtomicLong(0L) // Good app accumulator
     private val lastBucketUpdateTime = AtomicLong(System.currentTimeMillis())
 
     // Coroutine scope for background tasks like API calls
@@ -130,6 +131,10 @@ class AppUsageMonitorService : Service() {
         // Initialize accumulated non-wasteful time
         val persistedAccumulated = SettingsManager.getAccumulatedNonWastefulMs(this, 0L)
         bucketAccumulatedNonWastefulMs.set(persistedAccumulated)
+        
+        // Initialize good app accumulated time
+        val persistedGoodAppAccumulated = SettingsManager.getGoodAppAccumulatedMs(this, 0L)
+        bucketGoodAppAccumulatedMs.set(persistedGoodAppAccumulated)
         
         lastBucketUpdateTime.set(System.currentTimeMillis())
 
@@ -486,7 +491,8 @@ class AppUsageMonitorService : Service() {
     private data class AppInfo(
         val packageName: String,
         val readableName: String,
-        val isWasteful: Boolean
+        val isWasteful: Boolean,
+        val isGoodApp: Boolean = false
     )
 
     private fun getAppInfoFromCurrentApp(): AppInfo? {
@@ -494,11 +500,12 @@ class AppUsageMonitorService : Service() {
         return if (pkg.startsWith("web:")) {
             val host = pkg.removePrefix("web:")
             val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
-            AppInfo(packageName = pkg, readableName = host, isWasteful = wasteful)
+            AppInfo(packageName = pkg, readableName = host, isWasteful = wasteful, isGoodApp = false)
         } else {
             val readable = getReadableAppName(pkg)
             val wasteful = isWastefulApp(pkg)
-            AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful)
+            val goodApp = GoodAppManager.isGoodApp(applicationContext, pkg)
+            AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful, isGoodApp = goodApp)
         }
     }
 
@@ -567,17 +574,20 @@ class AppUsageMonitorService : Service() {
                     return AppInfo(
                         packageName = "web:$browserHost",
                         readableName = browserHost,
-                        isWasteful = wasteful
+                        isWasteful = wasteful,
+                        isGoodApp = false
                     )
                 }
 
                 val readableName = getReadableAppName(currentForegroundApp)
                 val isWasteful = isWastefulApp(currentForegroundApp)
+                val isGoodApp = GoodAppManager.isGoodApp(applicationContext, currentForegroundApp)
                 
                 return AppInfo(
                     packageName = currentForegroundApp,
                     readableName = readableName,
-                    isWasteful = isWasteful
+                    isWasteful = isWasteful,
+                    isGoodApp = isGoodApp
                 )
             }
             
@@ -594,6 +604,7 @@ class AppUsageMonitorService : Service() {
         // Only use newly detected app; do not carry previous when detection is null
         val detectedApp = appInfo?.packageName ?: ""
         val isCurrentlyWasteful = appInfo?.isWasteful == true
+        val isCurrentlyGoodApp = appInfo?.isGoodApp == true
 
         // ---------------- Token bucket update ----------------
         val now = System.currentTimeMillis()
@@ -602,15 +613,21 @@ class AppUsageMonitorService : Service() {
         val config = TokenBucketConfig(
             maxThresholdMs = TimeUnit.MINUTES.toMillis(SettingsManager.getMaxThresholdMinutes(this).toLong()),
             replenishIntervalMs = TimeUnit.MINUTES.toMillis(SettingsManager.getReplenishIntervalMinutes(this).toLong()),
-            replenishAmountMs = TimeUnit.MINUTES.toMillis(SettingsManager.getReplenishAmountMinutes(this).toLong())
+            replenishAmountMs = TimeUnit.MINUTES.toMillis(SettingsManager.getReplenishAmountMinutes(this).toLong()),
+            maxOverfillMs = TimeUnit.MINUTES.toMillis(SettingsManager.getMaxOverfillMinutes(this).toLong()),
+            overfillDecayPerHourMs = TimeUnit.MINUTES.toMillis(SettingsManager.getOverfillDecayPerHourMinutes(this).toLong()),
+            goodAppRewardIntervalMs = TimeUnit.MINUTES.toMillis(SettingsManager.getGoodAppRewardIntervalMinutes(this).toLong()),
+            goodAppRewardAmountMs = TimeUnit.MINUTES.toMillis(SettingsManager.getGoodAppRewardAmountMinutes(this).toLong())
         )
         
         val updateResult = TokenBucket.update(
             previousRemainingMs = bucketRemainingMs.get(),
-            previousAccumulatedNonWastefulMs = bucketAccumulatedNonWastefulMs.get(), // Pass accumulator
-            lastUpdateTimeMs = previousUpdate, // Use the value from *before* getAndSet
+            previousAccumulatedNonWastefulMs = bucketAccumulatedNonWastefulMs.get(),
+            previousGoodAppAccumulatedMs = bucketGoodAppAccumulatedMs.get(),
+            lastUpdateTimeMs = previousUpdate,
             nowMs = now,
             isCurrentlyWasteful = isCurrentlyWasteful,
+            isCurrentlyGoodApp = isCurrentlyGoodApp,
             config = config
         )
 
@@ -622,12 +639,16 @@ class AppUsageMonitorService : Service() {
         if (updateResult.newAccumulatedNonWastefulMs != bucketAccumulatedNonWastefulMs.get()) {
             bucketAccumulatedNonWastefulMs.set(updateResult.newAccumulatedNonWastefulMs)
         }
+        if (updateResult.newGoodAppAccumulatedMs != bucketGoodAppAccumulatedMs.get()) {
+            bucketGoodAppAccumulatedMs.set(updateResult.newGoodAppAccumulatedMs)
+        }
         
         // Persist values occasionally (every minute)
         // Check now - previousUpdate (delta) to ensure we're not saving too aggressively if this is called more often.
         if ((now - previousUpdate) >= TimeUnit.MINUTES.toMillis(1)) {
             SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
-            SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get()) // Persist accumulator
+            SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get())
+            SettingsManager.setGoodAppAccumulatedMs(this, bucketGoodAppAccumulatedMs.get())
         }
 
         // If bucket just transitioned from empty (<=0) to full (== max), archive & clear

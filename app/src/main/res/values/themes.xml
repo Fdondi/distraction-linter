@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.TimeLinter" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.TimeLinter" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Make status bar transparent for edge-to-edge mode -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Set status bar content to dark or light based on background -->
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

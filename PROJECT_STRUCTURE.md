@@ -25,6 +25,11 @@ Entrypoint and UI
 
 - app/src/main/java/com/example/timelinter/TimerSettingsScreen.kt
   - Configures monitoring thresholds/timers.
+  - Includes good apps reward settings (reward interval, reward amount, max overfill, decay rate).
+
+- app/src/main/java/com/example/timelinter/GoodAppSelectionScreen.kt
+  - Screen for selecting beneficial apps that provide time rewards.
+  - Similar to AppSelectionScreen but for good apps.
 
 Background Services and Flow
 - app/src/main/java/com/example/timelinter/AppUsageMonitorService.kt
@@ -34,6 +39,11 @@ Background Services and Flow
     - `ConversationHistoryManager` (system prompt, memory, user templates)
     - `AIInteractionManager` (Gemini model + calls)
   - Responds to tool commands (Allow/Remember) and updates storage (`AIMemoryManager`) and UI store (`ConversationLogStore`).
+  - Good Apps integration:
+    - Tracks `bucketGoodAppAccumulatedMs` for reward accumulation
+    - Passes `isCurrentlyGoodApp` to TokenBucket.update()
+    - Applies good app rewards and overfill decay through TokenBucket
+    - Private `AppInfo` includes `isGoodApp` field
 
 Reset Event (Bucket Refilled to Full)
 - Trigger: When the token bucket transitions from empty (<=0) back to full (== max) during non‑wasteful time accumulation.
@@ -81,6 +91,12 @@ Memory and Settings
 
 - app/src/main/java/com/example/timelinter/SettingsManager.kt
   - Reads/writes app settings not covered elsewhere.
+  - Good Apps settings:
+    - `getMaxOverfillMinutes` / `setMaxOverfillMinutes` - maximum bonus time (default: 30 min)
+    - `getOverfillDecayPerHourMinutes` / `setOverfillDecayPerHourMinutes` - overfill decay rate (default: 10 min/hr)
+    - `getGoodAppRewardIntervalMinutes` / `setGoodAppRewardIntervalMinutes` - interval to earn rewards (default: 5 min)
+    - `getGoodAppRewardAmountMinutes` / `setGoodAppRewardAmountMinutes` - reward amount (default: 10 min)
+    - `getGoodAppAccumulatedMs` / `setGoodAppAccumulatedMs` - persistence for reward accumulator
 
 - app/src/main/java/com/example/timelinter/ApiKeyManager.kt
   - Stores API key, coach name, and user notes.
@@ -110,12 +126,22 @@ AI Configuration
   - Provides export/import functionality for configurations.
   - Accessible from main screen via Settings icon in top bar.
 
-Wasteful Apps and Token Bucket
+Wasteful Apps, Good Apps, and Token Bucket
 - app/src/main/java/com/example/timelinter/TimeWasterAppManager.kt
   - Tracks selected apps considered wasteful; resolves labels and persistence.
 
+- app/src/main/java/com/example/timelinter/GoodAppManager.kt
+  - Tracks selected apps considered beneficial (good apps); provides time rewards.
+  - Similar structure to TimeWasterAppManager but for rewarding good behavior.
+
 - app/src/main/java/com/example/timelinter/TokenBucket.kt
   - Threshold accounting used by the service for triggering conversations.
+  - Supports good apps feature:
+    - Overfilling beyond normal max threshold
+    - Time rewards for using good apps
+    - Decay of overfill over time
+  - `TokenBucketConfig` includes good app parameters: maxOverfillMs, overfillDecayPerHourMs, goodAppRewardIntervalMs, goodAppRewardAmountMs
+  - `TokenBucketUpdateResult` includes goodAppAccumulatedMs for tracking reward progress.
 
 Prompts and Templates
 - app/src/main/java/com/example/timelinter/TemplateManager.kt
@@ -156,7 +182,8 @@ Android Resources
 Tests
 - Unit Tests – app/src/test/java/com/example/timelinter/
   - `AIMemorySimpleTest.kt`, `AIMemoryScenarioTest.kt` – memory behaviors
-  - `TokenBucketTest.kt` – token bucket logic
+  - `TokenBucketTest.kt` – token bucket logic (basic)
+  - `GoodAppsTokenBucketTest.kt` – comprehensive tests for good apps feature (overfill, decay, rewards)
   - `CoachNameUnitTest.kt`, `ApiKeyManagerCoachNameTest.kt`
 
 - Instrumented Tests – app/src/androidTest/java/com/example/timelinter/
@@ -165,6 +192,7 @@ Tests
   - `AIMemoryEditingInstrumentedTest.kt` – manager replace behavior and temp integrity
   - `AIMemoryRulesAndTempUITest.kt` – rules editor and temp grouping in UI
   - `FakeTimeProvider.kt`, `TimeFlowsTest.kt`
+  - `GoodAppsIntegrationTest.kt` – full integration tests for good apps (manager, settings, bucket)
 
 Event Log
 - app/src/main/java/com/example/timelinter/EventLogStore.kt

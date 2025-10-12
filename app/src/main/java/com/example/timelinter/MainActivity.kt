@@ -13,6 +13,7 @@ import android.text.util.Linkify
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
 import androidx.core.net.toUri
 import com.example.timelinter.ui.components.AppTopBar
@@ -65,6 +67,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Enable edge-to-edge mode to properly handle system bars
+        enableEdgeToEdge()
+        
+        // Ensure window insets are handled properly (especially for Samsung devices)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        
         // Check for API Key initially
         apiKeyPresent = ApiKeyManager.hasKey(this)
         // Load user notes
@@ -76,12 +85,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 var showAppsScreen by remember { mutableStateOf(false) }
+                var showGoodAppsScreen by remember { mutableStateOf(false) }
                 var showTimerScreen by remember { mutableStateOf(false) }
                 var showLogScreen by remember { mutableStateOf(false) }
                 var showAIConfigScreen by remember { mutableStateOf(false) }
 
                 if (showAppsScreen) {
                     AppSelectionScreen(onNavigateBack = { showAppsScreen = false })
+                } else if (showGoodAppsScreen) {
+                    GoodAppSelectionScreen(onNavigateBack = { showGoodAppsScreen = false })
                 } else if (showTimerScreen) {
                     TimerSettingsScreen(onNavigateBack = { showTimerScreen = false })
                 } else if (showLogScreen) {
@@ -125,6 +137,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onGoToChannelSettings = { openNotificationChannelSettings() },
                         onOpenApps = { showAppsScreen = true },
+                        onOpenGoodApps = { showGoodAppsScreen = true },
                         onOpenTimers = { showTimerScreen = true },
                         onOpenLog = { showLogScreen = true },
                         onOpenAIConfig = { showAIConfigScreen = true },
@@ -316,6 +329,7 @@ fun TimeLinterApp(
     onDismissHeadsUpInfoDialog: () -> Unit,
     onGoToChannelSettings: () -> Unit,
     onOpenApps: () -> Unit,
+    onOpenGoodApps: () -> Unit,
     onOpenTimers: () -> Unit,
     onOpenLog: () -> Unit,
     onOpenAIConfig: () -> Unit,
@@ -342,7 +356,10 @@ fun TimeLinterApp(
                 title = stringResource(id = R.string.app_name),
                 actions = {
                     IconButton(onClick = onOpenApps) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Manage Apps")
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Wasteful Apps")
+                    }
+                    IconButton(onClick = onOpenGoodApps) {
+                        Icon(Icons.Default.Hexagon, contentDescription = "Good Apps")
                     }
                     IconButton(onClick = onOpenTimers) {
                         Icon(Icons.Default.Timer, contentDescription = "Timer Settings")

@@ -27,10 +27,7 @@ object AIConfigManager {
                 // If only modelName is stored, resolve full config from AVAILABLE_MODELS
                 if (parsed.has("modelId")) {
                     val id = AIModelId.fromId(parsed.getString("modelId"))
-                    id?.let { AIModelConfig(it) } ?: AIModelConfig(AIModelId.GEMINI_25_FLASH)
-                } else if (parsed.has("modelName") && !parsed.has("displayName")) {
-                    val id = AIModelId.fromModelName(parsed.getString("modelName"))
-                    id?.let { AIModelConfig(it) } ?: AIModelConfig(AIModelId.GEMINI_25_FLASH)
+                    id?.let { AIModelConfig.AVAILABLE_MODELS.getValue(it) } ?: AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
                 } else {
                     parseModelConfig(parsed)
                 }
@@ -72,9 +69,7 @@ object AIConfigManager {
     /**
      * Get list of available models
      */
-    fun getAvailableModels(): List<AIModelConfig> {
-        return AIModelConfig.AVAILABLE_MODELS
-    }
+    fun getAvailableModels(): List<AIModelConfig> = AIModelConfig.AVAILABLE_MODELS.values.toList()
 
     /**
      * Reset all configurations to defaults
@@ -139,16 +134,12 @@ object AIConfigManager {
      * Parse AIModelConfig from JSON
      */
     private fun parseModelConfig(json: JSONObject): AIModelConfig {
-        val id = when {
-            json.has("modelId") -> AIModelId.fromId(json.getString("modelId"))
-            json.has("modelName") -> AIModelId.fromModelName(json.getString("modelName"))
-            else -> null
-        }
-        return id?.let { AIModelConfig(it) } ?: AIModelConfig(AIModelId.GEMINI_25_FLASH)
+        val id = if (json.has("modelId")) AIModelId.fromId(json.getString("modelId")) else null
+        return id?.let { AIModelConfig.AVAILABLE_MODELS.getValue(it) } ?: AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
     }
 
     private fun resolveDefault(task: AITask): AIModelConfig {
         val defaultId = AIModelConfig.DEFAULT_TASK_MODEL_IDS[task]
-        return defaultId?.let { AIModelConfig(it) } ?: AIModelConfig(AIModelId.GEMINI_25_FLASH)
+        return defaultId?.let { AIModelConfig.AVAILABLE_MODELS.getValue(it) } ?: AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
     }
 }

@@ -24,6 +24,19 @@ object SettingsManager {
     private const val DEFAULT_REPLENISH_INTERVAL_MINUTES = 10
     private const val DEFAULT_REPLENISH_AMOUNT_MINUTES = 1
 
+    // Good Apps settings keys
+    private const val MAX_OVERFILL_MINUTES_KEY = "max_overfill_minutes"
+    private const val OVERFILL_DECAY_PER_HOUR_MINUTES_KEY = "overfill_decay_per_hour_minutes"
+    private const val GOOD_APP_REWARD_INTERVAL_MINUTES_KEY = "good_app_reward_interval_minutes"
+    private const val GOOD_APP_REWARD_AMOUNT_MINUTES_KEY = "good_app_reward_amount_minutes"
+    private const val GOOD_APP_ACCUMULATED_MS_KEY = "good_app_accumulated_ms"
+
+    // Good Apps default values
+    private const val DEFAULT_MAX_OVERFILL_MINUTES = 30
+    private const val DEFAULT_OVERFILL_DECAY_PER_HOUR_MINUTES = 10
+    private const val DEFAULT_GOOD_APP_REWARD_INTERVAL_MINUTES = 5
+    private const val DEFAULT_GOOD_APP_REWARD_AMOUNT_MINUTES = 10
+
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
@@ -88,5 +101,49 @@ object SettingsManager {
 
     fun setAccumulatedNonWastefulMs(context: Context, value: Long) {
         getPreferences(context).edit().putLong(ACCUMULATED_NON_WASTEFUL_MS_KEY, value).apply()
+    }
+
+    /* =========================  Good Apps Settings  ========================= */
+
+    fun getMaxOverfillMinutes(context: Context): Int {
+        return getPreferences(context).getInt(MAX_OVERFILL_MINUTES_KEY, DEFAULT_MAX_OVERFILL_MINUTES)
+    }
+
+    fun setMaxOverfillMinutes(context: Context, minutes: Int) {
+        getPreferences(context).edit().putInt(MAX_OVERFILL_MINUTES_KEY, minutes).apply()
+    }
+
+    fun getOverfillDecayPerHourMinutes(context: Context): Int {
+        return getPreferences(context).getInt(OVERFILL_DECAY_PER_HOUR_MINUTES_KEY, DEFAULT_OVERFILL_DECAY_PER_HOUR_MINUTES)
+    }
+
+    fun setOverfillDecayPerHourMinutes(context: Context, minutes: Int) {
+        getPreferences(context).edit().putInt(OVERFILL_DECAY_PER_HOUR_MINUTES_KEY, minutes).apply()
+    }
+
+    fun getGoodAppRewardIntervalMinutes(context: Context): Int {
+        return getPreferences(context).getInt(GOOD_APP_REWARD_INTERVAL_MINUTES_KEY, DEFAULT_GOOD_APP_REWARD_INTERVAL_MINUTES)
+    }
+
+    fun setGoodAppRewardIntervalMinutes(context: Context, minutes: Int) {
+        getPreferences(context).edit().putInt(GOOD_APP_REWARD_INTERVAL_MINUTES_KEY, minutes).apply()
+    }
+
+    fun getGoodAppRewardAmountMinutes(context: Context): Int {
+        return getPreferences(context).getInt(GOOD_APP_REWARD_AMOUNT_MINUTES_KEY, DEFAULT_GOOD_APP_REWARD_AMOUNT_MINUTES)
+    }
+
+    fun setGoodAppRewardAmountMinutes(context: Context, minutes: Int) {
+        getPreferences(context).edit().putInt(GOOD_APP_REWARD_AMOUNT_MINUTES_KEY, minutes).apply()
+    }
+
+    /* ================= Good App Accumulated Time (persistence) ================ */
+
+    fun getGoodAppAccumulatedMs(context: Context, defaultValue: Long): Long {
+        return getPreferences(context).getLong(GOOD_APP_ACCUMULATED_MS_KEY, defaultValue)
+    }
+
+    fun setGoodAppAccumulatedMs(context: Context, value: Long) {
+        getPreferences(context).edit().putLong(GOOD_APP_ACCUMULATED_MS_KEY, value).apply()
     }
 }
