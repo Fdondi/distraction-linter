@@ -41,6 +41,9 @@ import androidx.core.view.WindowCompat
 import com.example.timelinter.ui.components.ScrollableTextFieldWithScrollbar
 import androidx.core.net.toUri
 import com.example.timelinter.ui.components.AppTopBar
+import android.content.ServiceConnection
+import android.content.ComponentName
+import android.os.IBinder
 class MainActivity : ComponentActivity() {
 
     private var showUsageAccessDialog by mutableStateOf(false)
@@ -50,6 +53,25 @@ class MainActivity : ComponentActivity() {
     private var apiKeyPresent by mutableStateOf(false)
     private var userNotes by mutableStateOf("")
     private var coachName by mutableStateOf("Adam")
+
+    // Service binding for better lifecycle management
+    private var boundService: AppUsageMonitorService? = null
+    private var isServiceBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as AppUsageMonitorService.LocalBinder
+            boundService = binder.getService()
+            isServiceBound = true
+            Log.d("MainActivity", "Service bound successfully")
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            boundService = null
+            isServiceBound = false
+            Log.d("MainActivity", "Service disconnected")
+        }
+    }
 
     // Launcher for Notification Permission
     private val requestNotificationPermissionLauncher = registerForActivityResult(
@@ -157,6 +179,20 @@ class MainActivity : ComponentActivity() {
         }
         // Update monitoring state based on service status
         isMonitoringActive = isServiceRunning()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up service binding
+        if (isServiceBound) {
+            try {
+                unbindService(serviceConnection)
+                isServiceBound = false
+                boundService = null
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Error unbinding service on destroy", e)
+            }
+        }
     }
 
     override fun onResume() {
@@ -296,20 +332,45 @@ class MainActivity : ComponentActivity() {
     private fun startMonitoringService() {
         val intent = Intent(this, AppUsageMonitorService::class.java)
         startForegroundService(intent)
+
+        // Also bind to the service for better lifecycle management
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     private fun stopMonitoringService() {
+        // Unbind first if bound
+        if (isServiceBound) {
+            unbindService(serviceConnection)
+            isServiceBound = false
+            boundService = null
+        }
+
+        // Then stop the service
         val intent = Intent(this, AppUsageMonitorService::class.java)
         stopService(intent)
     }
 
-    // Helper to check if a service is running
+    // Helper to check if our specific service is running
     private fun isServiceRunning(): Boolean {
+        // First check if we have a bound service that's ready
+        if (isServiceBound && boundService?.isServiceReady() == true) {
+            return true
+        }
+
+        // Fallback to checking running services
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        // Use the modern approach for checking running services
-        return manager.runningAppProcesses?.any { processInfo ->
-            processInfo.processName == packageName && processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
-        } ?: false
+        // Check for running services (this works for API 26+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return manager.getRunningServices(Integer.MAX_VALUE)?.any { serviceInfo ->
+                serviceInfo.service.className == AppUsageMonitorService::class.java.name
+            } ?: false
+        } else {
+            // For older versions, check running processes more carefully
+            return manager.runningAppProcesses?.any { processInfo ->
+                processInfo.processName == packageName &&
+                processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+            } ?: false
+        }
     }
 }
 

@@ -27,10 +27,10 @@ import android.app.PendingIntent
 import androidx.core.app.Person
 import com.example.timelinter.BrowserUrlAccessibilityService
 import android.app.KeyguardManager
-import android.content.pm.PackageManager
+import com.google.ai.client.generativeai.type.GenerateContentResponse
 import android.content.Intent.ACTION_MAIN
 import android.content.Intent.CATEGORY_HOME
-import com.google.ai.client.generativeai.type.GenerateContentResponse
+import android.content.pm.PackageManager
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -39,6 +39,14 @@ class AppUsageMonitorService : Service() {
     private lateinit var aiManager: AIInteractionManager
     private lateinit var conversationHistoryManager: ConversationHistoryManager
     private lateinit var interactionStateManager: InteractionStateManager
+
+    // Service binding for lifecycle management
+    private val binder = LocalBinder()
+    private var boundClients = 0
+
+    inner class LocalBinder : android.os.Binder() {
+        fun getService(): AppUsageMonitorService = this@AppUsageMonitorService
+    }
 
     companion object {
         // Notification Channel IDs
@@ -77,7 +85,7 @@ class AppUsageMonitorService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Monitoring state
-    @Volatile private var isMonitoringScheduled = false
+    private val isMonitoringScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
     private var mainLoopFuture: ScheduledFuture<*>? = null
     private var statsFuture: ScheduledFuture<*>? = null
     private var screenStateReceiver: BroadcastReceiver? = null
@@ -167,7 +175,7 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun startMonitoring() {
-        if (isMonitoringScheduled) {
+        if (isMonitoringScheduled.get()) {
              Log.d(TAG, "startMonitoring: Monitoring already scheduled. Skipping.")
              return
         }
@@ -194,12 +202,12 @@ class AppUsageMonitorService : Service() {
                  }
              }, 5, statsUpdateIntervalSeconds, TimeUnit.SECONDS)
              
-             isMonitoringScheduled = true
+             isMonitoringScheduled.set(true)
              Log.i(TAG, "Monitoring tasks scheduled successfully.")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error scheduling monitoring tasks", e)
-             isMonitoringScheduled = false
+             isMonitoringScheduled.set(false)
         }
     }
 
@@ -212,7 +220,7 @@ class AppUsageMonitorService : Service() {
         } finally {
             mainLoopFuture = null
             statsFuture = null
-            isMonitoringScheduled = false
+            isMonitoringScheduled.set(false)
             Log.i(TAG, "Monitoring tasks stopped (${reason}).")
         }
     }
@@ -225,7 +233,7 @@ class AppUsageMonitorService : Service() {
                 when (action) {
                     Intent.ACTION_SCREEN_OFF -> {
                         Log.i(TAG, "Screen turned off; stopping monitoring tasks and clearing current app")
-                        if (isMonitoringScheduled) stopMonitoringTasks("screen off")
+                        if (isMonitoringScheduled.get()) stopMonitoringTasks("screen off")
                         // Clear current app so that next unlock doesn't reuse stale context
                         currentApp = ""
                         // Reset interaction state to observing to avoid mid-conversation surprises
@@ -238,13 +246,17 @@ class AppUsageMonitorService : Service() {
                         if (!isDeviceLockedOrScreenOff()) {
                             Log.i(TAG, "User present/screen on; attempting to start monitoring")
                             startMonitoring()
-                            // Immediately check current app and refill bucket based on time passed
-                            // This ensures we don't wait up to checkIntervalSeconds before first check
-                            try {
-                                Log.d(TAG, "Running immediate check after unlock")
-                                mainInteractionLoop()
-                            } catch (t: Throwable) {
-                                Log.e(TAG, "Error during immediate unlock check", t)
+
+                            // Schedule immediate check with a small delay to avoid race conditions
+                            // This ensures monitoring tasks are properly started before running the first check
+                            serviceScope.launch {
+                                kotlinx.coroutines.delay(100) // Small delay to ensure monitoring is fully started
+                                try {
+                                    Log.d(TAG, "Running immediate check after unlock")
+                                    mainInteractionLoop()
+                                } catch (t: Throwable) {
+                                    Log.e(TAG, "Error during immediate unlock check", t)
+                                }
                             }
                         } else {
                             Log.v(TAG, "Received ${action} but device still locked or screen off; not starting")
@@ -1045,7 +1057,7 @@ class AppUsageMonitorService : Service() {
         SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get()) // Persist accumulator
         serviceScope.cancel()
         executor.shutdown()
-        isMonitoringScheduled = false
+        isMonitoringScheduled.set(false)
         
         // Cancel all notifications when service is destroyed
         notificationManager.cancelAll()
@@ -1063,5 +1075,24 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?): IBinder? {
+        boundClients++
+        Log.d(TAG, "Service bound, total clients: $boundClients")
+        return binder
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        boundClients--
+        Log.d(TAG, "Service unbound, total clients: $boundClients")
+        // Return false to not call onRebind when a client re-binds
+        return false
+    }
+
+    // Method to check if service is properly initialized and running
+    fun isServiceReady(): Boolean {
+        return this::notificationManager.isInitialized &&
+               this::aiManager.isInitialized &&
+               this::conversationHistoryManager.isInitialized &&
+               this::interactionStateManager.isInitialized
+    }
 }
