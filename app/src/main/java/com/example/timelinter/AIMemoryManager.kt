@@ -3,15 +3,24 @@ package com.example.timelinter
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import java.util.concurrent.TimeUnit
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
+import kotlinx.datetime.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlin.time.Duration
 
+@Serializable
 data class MemoryItem(
     val content: String,
-    val expiresAt: Long? = null // null means FOREVER
-)
+    val createdAt: Instant,
+    val expiresAt: Instant? = null // null means permanent memory
+    
+) {
+    fun isExpiredAt(now: Instant): Boolean {
+        return expiresAt != null && now >= expiresAt
+    }
+}
+
 
 object AIMemoryManager {
     private const val PREF_NAME = "ai_memory"
@@ -36,15 +45,15 @@ object AIMemoryManager {
         Log.d(TAG, "Added permanent memory: $content")
     }
 
-    fun addTemporaryMemory(context: Context, content: String, durationMinutes: Int, timeProvider: TimeProvider = SystemTimeProvider) {
+    fun addTemporaryMemory(context: Context, content: String, duration: Duration, timeProvider: TimeProvider = SystemTimeProvider) {
         val prefs = getPreferences(context)
-        val now = timeProvider.now()
-        val expiresAt = now + TimeUnit.MINUTES.toMillis(durationMinutes.toLong())
-        val key = "${TEMPORARY_MEMORY_PREFIX}$now"
-        
-        // Store as "content|expiresAt"
-        prefs.edit().putString(key, "$content|$expiresAt").apply()
-        Log.d(TAG, "Added temporary memory for $durationMinutes minutes: $content")
+        val expiresAt = timeProvider.now() + duration
+        val key = "${TEMPORARY_MEMORY_PREFIX}${timeProvider.now().epochSeconds}"
+
+        val memoryItem = MemoryItem(content, timeProvider.now(), expiresAt)
+        val serialized = Json.encodeToString(memoryItem)
+        prefs.edit().putString(key, serialized).apply()
+        Log.d(TAG, "Added temporary memory for $duration: $content")
     }
 
     fun setPermanentMemory(context: Context, content: String) {
@@ -77,7 +86,7 @@ object AIMemoryManager {
     }
 
     data class TemporaryGroupByDate(
-        val expirationDateKey: String,
+        val expirationDateKey: Instant,
         val items: List<String>
     )
 
@@ -86,29 +95,25 @@ object AIMemoryManager {
         timeProvider: TimeProvider = SystemTimeProvider
     ): List<TemporaryGroupByDate> {
         val prefs = getPreferences(context)
-        val currentTime = timeProvider.now()
         val editor = prefs.edit()
-        val groups = mutableMapOf<String, MutableList<String>>()
+        val groups = mutableMapOf<Instant, MutableList<String>>()
 
         for ((key, value) in prefs.all) {
             if (key.startsWith(TEMPORARY_MEMORY_PREFIX) && value is String) {
-                val parts = value.split("|")
-                if (parts.size == 2) {
-                    val content = parts[0]
-                    val expiresAt = parts[1].toLongOrNull()
-                    if (expiresAt != null) {
-                        if (currentTime < expiresAt) {
-                            val dateKey = LocalDate.ofInstant(
-                                Instant.ofEpochMilli(expiresAt),
-                                ZoneId.systemDefault()
-                            ).toString() // yyyy-MM-dd
-                            val list = groups.getOrPut(dateKey) { mutableListOf() }
-                            list.add(content)
-                        } else {
-                            editor.remove(key)
-                            Log.d(TAG, "Removed expired temp memory while grouping: $content")
-                        }
+                try {
+                    val memoryItem = Json.decodeFromString<MemoryItem>(value)
+                    if (!memoryItem.isExpiredAt(timeProvider.now())) {
+                        val expirationDate = memoryItem.expiresAt ?: continue
+                        val list = groups.getOrPut(expirationDate) { mutableListOf() }
+                        list.add(memoryItem.content)
+                    } else {
+                        editor.remove(key)
+                        Log.d(TAG, "Removed expired temp memory while grouping: ${memoryItem.content}")
                     }
+                } catch (e: Exception) {
+                    // If deserialization fails, remove the corrupted entry
+                    editor.remove(key)
+                    Log.w(TAG, "Removed corrupted memory entry while grouping: $key")
                 }
             }
         }
@@ -121,7 +126,6 @@ object AIMemoryManager {
 
     fun getAllMemories(context: Context, timeProvider: TimeProvider = SystemTimeProvider): String {
         val prefs = getPreferences(context)
-        val currentTime = timeProvider.now()
         val memories = mutableListOf<String>()
 
         // Add permanent memories
@@ -136,21 +140,20 @@ object AIMemoryManager {
         
         for ((key, value) in allPrefs) {
             if (key.startsWith(TEMPORARY_MEMORY_PREFIX) && value is String) {
-                val parts = value.split("|")
-                if (parts.size == 2) {
-                    val content = parts[0]
-                    val expiresAt = parts[1].toLongOrNull()
-                    
-                    if (expiresAt != null) {
-                        if (currentTime < expiresAt) {
-                            // Still valid
-                            memories.add(content)
-                        } else {
-                            // Expired, remove it
-                            editor.remove(key)
-                            Log.d(TAG, "Removed expired memory: $content")
-                        }
+                try {
+                    val memoryItem = Json.decodeFromString<MemoryItem>(value)
+                    if (!memoryItem.isExpiredAt(timeProvider.now())) {
+                        // Still valid
+                        memories.add(memoryItem.content)
+                    } else {
+                        // Expired, remove it
+                        editor.remove(key)
+                        Log.d(TAG, "Removed expired memory: ${memoryItem.content}")
                     }
+                } catch (e: Exception) {
+                    // If deserialization fails, remove the corrupted entry
+                    editor.remove(key)
+                    Log.w(TAG, "Removed corrupted memory entry: $key")
                 }
             }
         }

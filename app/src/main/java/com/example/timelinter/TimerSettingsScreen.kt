@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Dedicated screen for configuring all timer-related settings. Extracted from the old SettingsScreen.
@@ -22,16 +23,15 @@ fun TimerSettingsScreen(
     val context = LocalContext.current
 
     // State holders backed by SettingsManager
-    var observeTimerMinutes by remember { mutableStateOf(SettingsManager.getObserveTimerMinutes(context)) }
-    var responseTimerMinutes by remember { mutableStateOf(SettingsManager.getResponseTimerMinutes(context)) }
-    var maxThresholdMinutes by remember { mutableStateOf(SettingsManager.getMaxThresholdMinutes(context)) }
-    var replenishAmountMinutes by remember { mutableStateOf(SettingsManager.getReplenishAmountMinutes(context)) }
+    var observeTimer by remember { mutableStateOf(SettingsManager.getObserveTimer(context)) }
+    var responseTimer by remember { mutableStateOf(SettingsManager.getResponseTimer(context)) }
+    var maxThreshold by remember { mutableStateOf(SettingsManager.getMaxThreshold(context)) }
+    var replenishAmount by remember { mutableStateOf(SettingsManager.getReplenishAmount(context)) }
     
     // Good Apps settings
-    var maxOverfillMinutes by remember { mutableStateOf(SettingsManager.getMaxOverfillMinutes(context)) }
-    var overfillDecayPerHourMinutes by remember { mutableStateOf(SettingsManager.getOverfillDecayPerHourMinutes(context)) }
-    var goodAppRewardIntervalMinutes by remember { mutableStateOf(SettingsManager.getGoodAppRewardIntervalMinutes(context)) }
-    var goodAppRewardAmountMinutes by remember { mutableStateOf(SettingsManager.getGoodAppRewardAmountMinutes(context)) }
+    var maxOverfill by remember { mutableStateOf(SettingsManager.getMaxOverfill(context)) }
+    var overfillDecayPerHour by remember { mutableStateOf(SettingsManager.getOverfillDecayPerHour(context)) }
+    var goodAppFillRateMultiplier by remember { mutableStateOf(SettingsManager.getGoodAppFillRateMultiplier(context)) }
 
     Scaffold(
         topBar = {
@@ -57,15 +57,15 @@ fun TimerSettingsScreen(
             TimerCard(
                 title = "Observe Timer",
                 description = "How long to wait before checking if you're wasting time again",
-                valueText = "${observeTimerMinutes} minutes",
-                sliderValue = observeTimerMinutes,
+                valueText = "${observeTimer.inWholeMinutes} minutes",
+                sliderValue = observeTimer.inWholeMinutes,
                 valueRange = 1f..30f,
                 steps = 28,
                 onValueChange = { value ->
-                    observeTimerMinutes = value
-                    SettingsManager.setObserveTimerMinutes(context, observeTimerMinutes)
+                    observeTimer = value.minutes
+                    SettingsManager.setObserveTimer(context, observeTimer)
                     // Keep replenish interval in sync
-                    SettingsManager.setReplenishIntervalMinutes(context, observeTimerMinutes)
+                    SettingsManager.setReplenishInterval(context, observeTimer)
                 }
             )
 
@@ -73,13 +73,13 @@ fun TimerSettingsScreen(
             TimerCard(
                 title = "Response Timer",
                 description = "How long to wait for your response before considering it ignored",
-                valueText = "${responseTimerMinutes} minute${if (responseTimerMinutes > 1) "s" else ""}",
-                sliderValue = responseTimerMinutes,
+                valueText = "${responseTimer.inWholeMinutes} minutes",
+                sliderValue = responseTimer.inWholeMinutes,
                 valueRange = 1f..10f,
                 steps = 8,
                 onValueChange = { value ->
-                    responseTimerMinutes = value
-                    SettingsManager.setResponseTimerMinutes(context, responseTimerMinutes)
+                    responseTimer = value.minutes
+                    SettingsManager.setResponseTimer(context, responseTimer)
                 }
             )
 
@@ -87,13 +87,13 @@ fun TimerSettingsScreen(
             TimerCard(
                 title = "Max Allowed Minutes",
                 description = "How much time you can spend in wasteful apps before intervention (bucket size)",
-                valueText = "${maxThresholdMinutes} min",
-                sliderValue = maxThresholdMinutes,
+                valueText = "${maxThreshold.inWholeMinutes} min",
+                sliderValue = maxThreshold.inWholeMinutes,
                 valueRange = 1f..60f,
                 steps = 59,
                 onValueChange = { value ->
-                    maxThresholdMinutes = value
-                    SettingsManager.setMaxThresholdMinutes(context, maxThresholdMinutes)
+                    maxThreshold = value.minutes
+                    SettingsManager.setMaxThreshold(context, maxThreshold)
                 }
             )
 
@@ -101,13 +101,13 @@ fun TimerSettingsScreen(
             TimerCard(
                 title = "Replenish Amount",
                 description = "How many minutes are restored to your allowance each interval you stay off wasteful apps",
-                valueText = "${replenishAmountMinutes} min",
-                sliderValue = replenishAmountMinutes,
+                valueText = "${replenishAmount.inWholeMinutes} min",
+                sliderValue = replenishAmount.inWholeMinutes.toInt(),
                 valueRange = 1f..10f,
                 steps = 9,
                 onValueChange = { value ->
-                    replenishAmountMinutes = value
-                    SettingsManager.setReplenishAmountMinutes(context, replenishAmountMinutes)
+                    replenishAmount = value.minutes
+                    SettingsManager.setReplenishAmount(context, replenishAmount)
                 }
             )
 
@@ -120,31 +120,17 @@ fun TimerSettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            // Good App Reward Interval
+            // Good App Fill Rate Multiplier
             TimerCard(
-                title = "Good App Reward Interval",
-                description = "How many minutes of using good apps are needed to earn a reward",
-                valueText = "${goodAppRewardIntervalMinutes} min",
-                sliderValue = goodAppRewardIntervalMinutes,
-                valueRange = 1f..60f,
-                steps = 59,
+                title = "Good App Fill Rate",
+                description = "How much faster good apps fill your bucket (e.g., 2.0 = twice as fast)",
+                valueText = "${"%.1f".format(goodAppFillRateMultiplier)}x",
+                sliderValue = goodAppFillRateMultiplier,
+                valueRange = 0f..10f,
+                steps = 45,
                 onValueChange = { value ->
-                    goodAppRewardIntervalMinutes = value
-                    SettingsManager.setGoodAppRewardIntervalMinutes(context, goodAppRewardIntervalMinutes)
-                }
-            )
-
-            // Good App Reward Amount
-            TimerCard(
-                title = "Good App Reward Amount",
-                description = "How many bonus minutes you earn per reward interval",
-                valueText = "${goodAppRewardAmountMinutes} min",
-                sliderValue = goodAppRewardAmountMinutes,
-                valueRange = 1f..30f,
-                steps = 29,
-                onValueChange = { value ->
-                    goodAppRewardAmountMinutes = value
-                    SettingsManager.setGoodAppRewardAmountMinutes(context, goodAppRewardAmountMinutes)
+                    goodAppFillRateMultiplier = value
+                    SettingsManager.setGoodAppFillRateMultiplier(context, goodAppFillRateMultiplier)
                 }
             )
 
@@ -158,7 +144,7 @@ fun TimerSettingsScreen(
                 steps = 60,
                 onValueChange = { value ->
                     maxOverfillMinutes = value
-                    SettingsManager.setMaxOverfillMinutes(context, maxOverfillMinutes)
+                    SettingsManager.setMaxOverfill(context, maxOverfillMinutes)
                 }
             )
 
@@ -166,13 +152,13 @@ fun TimerSettingsScreen(
             TimerCard(
                 title = "Overfill Decay Rate",
                 description = "How many minutes of bonus time decay per hour when not using good apps",
-                valueText = "${overfillDecayPerHourMinutes} min/hour",
-                sliderValue = overfillDecayPerHourMinutes,
+                valueText = "${overfillDecayPerHour.inWholeMinutes} min/hour",
+                sliderValue = overfillDecayPerHour.inWholeMinutes,
                 valueRange = 0f..30f,
                 steps = 30,
                 onValueChange = { value ->
-                    overfillDecayPerHourMinutes = value
-                    SettingsManager.setOverfillDecayPerHourMinutes(context, overfillDecayPerHourMinutes)
+                    overfillDecayPerHour = value.minutes
+                    SettingsManager.setOverfillDecayPerHour(context, overfillDecayPerHour)
                 }
             )
 
@@ -189,11 +175,11 @@ fun TimerSettingsScreen(
                                 "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up\n" +
                                 "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)\n" +
                                 "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer)\n\n" +
-                                "Good Apps:\n" +
-                                "• Reward Interval: How long you need to use good apps to earn a reward\n" +
-                                "• Reward Amount: Bonus time earned per interval (can exceed your normal limit)\n" +
-                                "• Max Overfill: Maximum bonus time you can store beyond your limit\n" +
-                                "• Decay Rate: How fast bonus time decays when not using good apps",
+                                "Unified Bucket System:\n" +
+                                "• Good App Fill Rate: How much faster good apps fill your bucket (can exceed normal limit)\n" +
+                                "• Neutral App Fill Rate: How fast neutral apps fill your bucket\n" +
+                                "• Max Overfill: Maximum extra time you can store beyond your normal limit\n" +
+                                "• Decay Rate: How fast overfill decays when not using good apps",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

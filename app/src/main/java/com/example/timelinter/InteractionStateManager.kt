@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlinx.datetime.Instant
 
 enum class InteractionState {
     OBSERVING,           // Step 0-1: Waiting for threshold to be exceeded
@@ -20,12 +23,12 @@ class InteractionStateManager(
     @Volatile
     private var currentState = InteractionState.OBSERVING
     
-    private val lastStateChangeTime = AtomicLong(timeProvider.now())
-    private val responseTimeoutTime = AtomicLong(0)
-    private val allowedUntilTime = AtomicLong(0)
-    
+    private var lastStateChangeTime: Instant = timeProvider.now()
+    private var responseTimeoutTime: Instant? = null
+    private var allowedUntilTime: Instant? = null
+
     // App-specific allow times
-    private val appAllowTimes = mutableMapOf<String, Long>()
+    private val appAllowTimes = mutableMapOf<String, Instant>()
     
     fun getCurrentState(): InteractionState = currentState
     
@@ -38,34 +41,34 @@ class InteractionStateManager(
     fun shouldObserve(): Boolean {
         if (currentState != InteractionState.OBSERVING) return false
         
-        val observeTimerMinutes = SettingsManager.getObserveTimerMinutes(context)
-        val timeSinceLastChange = timeProvider.now() - lastStateChangeTime.get()
-        val observeTimerMs = TimeUnit.MINUTES.toMillis(observeTimerMinutes.toLong())
+        val observeTimer = SettingsManager.getObserveTimer(context)
+        val timeSinceLastChange = timeProvider.now() - lastStateChangeTime
         
-        return timeSinceLastChange >= observeTimerMs
+        return timeSinceLastChange >= observeTimer
     }
-    
+
     fun isResponseTimedOut(): Boolean {
         if (currentState != InteractionState.WAITING_FOR_RESPONSE) return false
         
-        val timeoutTime = responseTimeoutTime.get()
-        return timeoutTime > 0 && timeProvider.now() >= timeoutTime
+        val timeoutTime = responseTimeoutTime!!
+        return timeProvider.now() >= timeoutTime
     }
     
     fun isAllowed(appName: String? = null): Boolean {
         val currentTime = timeProvider.now()
         
         // Check global allow
-        if (currentTime < allowedUntilTime.get()) {
-            Log.d(TAG, "Global allow active until ${java.util.Date(allowedUntilTime.get())}")
+        val globalAllowedUntil = allowedUntilTime
+        if (globalAllowedUntil != null && currentTime < globalAllowedUntil) {
+            Log.d(TAG, "Global allow active")
             return true
         }
         
         // Check app-specific allow
         if (appName != null) {
-            val appAllowTime = appAllowTimes[appName] ?: 0
-            if (currentTime < appAllowTime) {
-                Log.d(TAG, "App '$appName' allowed until ${java.util.Date(appAllowTime)}")
+            val appAllowTime = appAllowTimes[appName]
+            if (appAllowTime != null && currentTime < appAllowTime) {
+                Log.d(TAG, "App '$appName' allowed")
                 return true
             }
         }
@@ -76,7 +79,7 @@ class InteractionStateManager(
     fun startConversation() {
         Log.d(TAG, "Starting conversation (threshold exceeded)")
         currentState = InteractionState.CONVERSATION_ACTIVE
-        lastStateChangeTime.set(timeProvider.now())
+        lastStateChangeTime = timeProvider.now()
         EventLogStore.logStateChange(currentState)
     }
     
@@ -85,10 +88,9 @@ class InteractionStateManager(
         currentState = InteractionState.WAITING_FOR_RESPONSE
         
         val responseTimerMinutes = SettingsManager.getResponseTimerMinutes(context)
-        val timeoutMs = TimeUnit.MINUTES.toMillis(responseTimerMinutes.toLong())
-        responseTimeoutTime.set(timeProvider.now() + timeoutMs)
-        
-        Log.d(TAG, "Response timeout set for ${java.util.Date(responseTimeoutTime.get())}")
+        responseTimeoutTime = timeProvider.now() + responseTimerMinutes.minutes
+
+        Log.d(TAG, "Response timeout set for $responseTimerMinutes minutes from now")
         EventLogStore.logStateChange(currentState)
     }
     
@@ -101,19 +103,18 @@ class InteractionStateManager(
     }
     
     fun applyAllowCommand(allowCommand: ToolCommand.Allow) {
-        val allowMs = TimeUnit.MINUTES.toMillis(allowCommand.minutes.toLong())
-        val allowUntil = timeProvider.now() + allowMs
-        
+        val allowUntil = timeProvider.now() + allowCommand.duration
+
         if (allowCommand.app != null) {
             // App-specific allow
             appAllowTimes[allowCommand.app] = allowUntil
-            Log.i(TAG, "Applied ALLOW for '${allowCommand.app}' until ${java.util.Date(allowUntil)}")
+            Log.i(TAG, "Applied ALLOW for '${allowCommand.app}' for ${allowCommand.duration}")
         } else {
             // Global allow for all wasteful apps
-            allowedUntilTime.set(allowUntil)
-            Log.i(TAG, "Applied global ALLOW until ${java.util.Date(allowUntil)}")
+            allowedUntilTime = allowUntil
+            Log.i(TAG, "Applied global ALLOW for ${allowCommand.duration}")
         }
-        
+
         // Reset conversation state
         resetToObserving()
     }
@@ -121,19 +122,20 @@ class InteractionStateManager(
     fun continueConversation() {
         Log.d(TAG, "Continuing conversation")
         currentState = InteractionState.CONVERSATION_ACTIVE
-        responseTimeoutTime.set(0)
+        responseTimeoutTime = null
         EventLogStore.logStateChange(currentState)
     }
     
-    fun getTimeSinceLastStateChange(): Long {
-        return timeProvider.now() - lastStateChangeTime.get()
+    fun getTimeSinceLastStateChange(): Duration {
+        return timeProvider.now() - lastStateChangeTime
     }
-    
-    fun getTimeUntilResponseTimeout(): Long {
-        if (currentState != InteractionState.WAITING_FOR_RESPONSE) return 0
-        val timeoutTime = responseTimeoutTime.get()
-        if (timeoutTime == 0L) return 0
-        return maxOf(0, timeoutTime - timeProvider.now())
+
+    fun getTimeUntilResponseTimeout(): Duration {
+        if (currentState != InteractionState.WAITING_FOR_RESPONSE) return Duration.ZERO
+        val timeoutTime = responseTimeoutTime!!
+        val now = timeProvider.now()
+        if (timeoutTime <= now) return Duration.ZERO
+        return timeoutTime - now
     }
     
     fun cleanupExpiredAllows() {

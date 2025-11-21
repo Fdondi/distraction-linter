@@ -16,11 +16,14 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import kotlinx.coroutines.*
-
+import kotlin.time.Duration
+import com.example.timelinter.TimeProvider
+import com.example.timelinter.SystemTimeProvider
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
 import java.util.*
 import android.app.usage.UsageStats
 import android.app.PendingIntent
@@ -68,18 +71,15 @@ class AppUsageMonitorService : Service() {
     private val statsUpdateIntervalSeconds = 30L // How often to update the stats notification
     private val checkIntervalSeconds = 10L // How often to check app usage for time tracking
 
-    private val sessionStartTime = AtomicLong(System.currentTimeMillis())
-    private val dailyStartTime = AtomicLong(getStartOfDay())
-    private val sessionWastedTime = AtomicLong(0)
-    private val dailyWastedTime = AtomicLong(0)
+    private lateinit var timeProvider: TimeProvider
+    private var sessionStart: Instant = timeProvider.now()
+    private var sessionWastedTime: Duration = Duration.ZERO
+    private var dailyWastedTime: Duration = Duration.ZERO
     private var currentApp: String = ""
-    private var lastAppChangeTime = AtomicLong(System.currentTimeMillis())
+    private var lastAppChangeTime: Instant = timeProvider.now()
 
-    // Token bucket threshold tracking
-    private val bucketRemainingMs = AtomicLong(0L)
-    private val bucketAccumulatedNonWastefulMs = AtomicLong(0L) // New state for accumulator
-    private val bucketGoodAppAccumulatedMs = AtomicLong(0L) // Good app accumulator
-    private val lastBucketUpdateTime = AtomicLong(System.currentTimeMillis())
+    // Unified token bucket - owns its own state
+    private lateinit var tokenBucket: TokenBucket
 
     // Coroutine scope for background tasks like API calls
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -112,7 +112,8 @@ class AppUsageMonitorService : Service() {
             systemPrompt = readRawResource(R.raw.gemini_system_prompt),
             aiMemoryTemplate = readRawResource(R.raw.ai_memory_template),
             userInfoTemplate = readRawResource(R.raw.user_info_template),
-            userInteractionTemplate = readRawResource(R.raw.gemini_user_template)
+            userInteractionTemplate = readRawResource(R.raw.gemini_user_template),
+            timeProvider = timeProvider
         )
         
         // Then initialize AIInteractionManager with the conversationHistoryManager
@@ -123,29 +124,8 @@ class AppUsageMonitorService : Service() {
         val coachName = ApiKeyManager.getCoachName(this)
         aiPerson = Person.Builder().setName(coachName).setKey("ai").setBot(true).build()
 
-        // Initialize token bucket with maximum threshold
-        val maxThresholdMs = TimeUnit.MINUTES.toMillis(
-            SettingsManager.getMaxThresholdMinutes(this).toLong()
-        )
-        val persistedRemaining = SettingsManager.getThresholdRemainingMs(this, maxThresholdMs)
-        val initialRemaining = if (persistedRemaining <= 0L) {
-            Log.i(TAG, "Persisted bucket was empty or missing. Resetting to max: ${maxThresholdMs} ms")
-            SettingsManager.setThresholdRemainingMs(this, maxThresholdMs)
-            maxThresholdMs
-        } else {
-            minOf(persistedRemaining, maxThresholdMs)
-        }
-        bucketRemainingMs.set(initialRemaining)
-        
-        // Initialize accumulated non-wasteful time
-        val persistedAccumulated = SettingsManager.getAccumulatedNonWastefulMs(this, 0L)
-        bucketAccumulatedNonWastefulMs.set(persistedAccumulated)
-        
-        // Initialize good app accumulated time
-        val persistedGoodAppAccumulated = SettingsManager.getGoodAppAccumulatedMs(this, 0L)
-        bucketGoodAppAccumulatedMs.set(persistedGoodAppAccumulated)
-        
-        lastBucketUpdateTime.set(System.currentTimeMillis())
+        // Initialize token bucket - it will handle its own state
+        tokenBucket = TokenBucket(this, timeProvider)
 
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
@@ -324,7 +304,7 @@ class AppUsageMonitorService : Service() {
         
         val isWasteful = appInfo?.isWasteful == true
         val isAllowed = if (appInfo != null) interactionStateManager.isAllowed(appInfo.readableName) else false
-        val remaining = bucketRemainingMs.get()
+        val remaining = tokenBucket.getCurrentRemaining()
         if (!TriggerDecider.shouldTrigger(isWasteful, isAllowed, remaining)) {
             return
         }
@@ -335,8 +315,8 @@ class AppUsageMonitorService : Service() {
         // Step 1b: Create initial AI history and start conversation
         conversationHistoryManager.startNewSession(
             appName = appInfo?.readableName ?: "Unknown App",
-            sessionTimeMs = sessionWastedTime.get(),
-            dailyTimeMs = dailyWastedTime.get()
+            sessionTime = sessionWastedTime,
+            dailyTime = dailyWastedTime
         )
         
         interactionStateManager.startConversation()
@@ -378,8 +358,8 @@ class AppUsageMonitorService : Service() {
             // Step 6a: Add "*no response*" to AI conversation (decorated), not UI
             conversationHistoryManager.addNoResponseMessage(
                 currentAppName = nonNullAppInfo.readableName,
-                sessionTimeMs = sessionWastedTime.get(),
-                dailyTimeMs = dailyWastedTime.get()
+                sessionTime = sessionWastedTime,
+                dailyTime = dailyWastedTime
             )
             
             // Continue conversation
@@ -410,7 +390,7 @@ class AppUsageMonitorService : Service() {
                 for (tool in parsedResponse.tools) {
                     when (tool) {
                         is ToolCommand.Allow -> {
-                            Log.i(TAG, "Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
+                            Log.i(TAG, "Processing ALLOW tool: ${tool.duration} extra time for app ${tool.app?.let { " for $it" } ?: ""}")
                             interactionStateManager.applyAllowCommand(tool)
                             // Log tool usage to API history only
                             conversationHistoryManager.addToolLog(tool)
@@ -418,7 +398,7 @@ class AppUsageMonitorService : Service() {
                         }
                         is ToolCommand.Remember -> {
                             Log.i(TAG, "Processing REMEMBER tool: ${tool.content}")
-                            val tmp: Int? = tool.durationMinutes
+                            val tmp: Duration? = tool.duration
                             if (tmp != null) {
                                 AIMemoryManager.addTemporaryMemory(this@AppUsageMonitorService, tool.content, tmp)
                             } else {
@@ -441,7 +421,7 @@ class AppUsageMonitorService : Service() {
                             currentAppReadableName = appInfo?.readableName
                         )
                         if (inferred != null && parsedResponse.tools.none { it is ToolCommand.Allow }) {
-                            Log.i(TAG, "Inferred ALLOW from model text: ${inferred.minutes} minutes${inferred.app?.let { " for $it" } ?: ""}")
+                            Log.i(TAG, "Inferred ALLOW from model text: ${inferred.duration} ${inferred.app?.let { " for $it" } ?: ""}")
                             interactionStateManager.applyAllowCommand(inferred)
                             conversationHistoryManager.addToolLog(inferred)
                             shouldResetConversation = true
@@ -452,8 +432,8 @@ class AppUsageMonitorService : Service() {
                     conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
                     showConversationNotification(
                         appName = appInfo?.readableName ?: "Unknown App",
-                        sessionTimeMs = sessionWastedTime.get(),
-                        dailyTimeMs = dailyWastedTime.get()
+                        sessionTime = sessionWastedTime,
+                        dailyTime = dailyWastedTime
                     )
                 }
 
@@ -490,11 +470,11 @@ class AppUsageMonitorService : Service() {
                 Log.i(TAG, "User replied: '$replyText'")
                 
                 val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
-                val sessionMs = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L)
-                val dailyMs = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L)
+                val sessionTime = intent.getLongExtra(EXTRA_SESSION_TIME_MS, 0L).toDuration(DurationUnit.MILLISECONDS)
+                val dailyTime = intent.getLongExtra(EXTRA_DAILY_TIME_MS, 0L).toDuration(DurationUnit.MILLISECONDS)
 
                 // Step 6b: User answered, save response and continue
-                conversationHistoryManager.addUserMessage(replyText, appName, sessionMs, dailyMs)
+                conversationHistoryManager.addUserMessage(replyText, appName, sessionTime, dailyTime)
                 interactionStateManager.continueConversation()
                 
                 // Step 7: Go to step 2 - send to AI (USER_RESPONSE)
@@ -622,59 +602,23 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun updateTimeTracking(appInfo: AppInfo?) {
-        // Only use newly detected app; do not carry previous when detection is null
         val detectedApp = appInfo?.packageName ?: ""
         val isCurrentlyWasteful = appInfo?.isWasteful == true
         val isCurrentlyGoodApp = appInfo?.isGoodApp == true
 
-        // ---------------- Token bucket update ----------------
-        val now = System.currentTimeMillis()
-        val previousUpdate = lastBucketUpdateTime.getAndSet(now) // Important: getAndSet ensures atomicity for lastBucketUpdateTime
-        
-        val config = TokenBucketConfig(
-            maxThresholdMs = TimeUnit.MINUTES.toMillis(SettingsManager.getMaxThresholdMinutes(this).toLong()),
-            replenishIntervalMs = TimeUnit.MINUTES.toMillis(SettingsManager.getReplenishIntervalMinutes(this).toLong()),
-            replenishAmountMs = TimeUnit.MINUTES.toMillis(SettingsManager.getReplenishAmountMinutes(this).toLong()),
-            maxOverfillMs = TimeUnit.MINUTES.toMillis(SettingsManager.getMaxOverfillMinutes(this).toLong()),
-            overfillDecayPerHourMs = TimeUnit.MINUTES.toMillis(SettingsManager.getOverfillDecayPerHourMinutes(this).toLong()),
-            goodAppRewardIntervalMs = TimeUnit.MINUTES.toMillis(SettingsManager.getGoodAppRewardIntervalMinutes(this).toLong()),
-            goodAppRewardAmountMs = TimeUnit.MINUTES.toMillis(SettingsManager.getGoodAppRewardAmountMinutes(this).toLong())
-        )
-        
-        val updateResult = TokenBucket.update(
-            previousRemainingMs = bucketRemainingMs.get(),
-            previousAccumulatedNonWastefulMs = bucketAccumulatedNonWastefulMs.get(),
-            previousGoodAppAccumulatedMs = bucketGoodAppAccumulatedMs.get(),
-            lastUpdateTimeMs = previousUpdate,
-            nowMs = now,
-            isCurrentlyWasteful = isCurrentlyWasteful,
-            isCurrentlyGoodApp = isCurrentlyGoodApp,
-            config = config
-        )
+        // Determine the current app state
+        val currentAppState = when {
+            isCurrentlyWasteful -> AppState.WASTEFUL
+            isCurrentlyGoodApp -> AppState.GOOD
+            else -> AppState.NEUTRAL
+        }
 
-        // Update state from result
-        val oldRemaining = bucketRemainingMs.get()
-        if (updateResult.newRemainingMs != oldRemaining) {
-            bucketRemainingMs.set(updateResult.newRemainingMs)
-        }
-        if (updateResult.newAccumulatedNonWastefulMs != bucketAccumulatedNonWastefulMs.get()) {
-            bucketAccumulatedNonWastefulMs.set(updateResult.newAccumulatedNonWastefulMs)
-        }
-        if (updateResult.newGoodAppAccumulatedMs != bucketGoodAppAccumulatedMs.get()) {
-            bucketGoodAppAccumulatedMs.set(updateResult.newGoodAppAccumulatedMs)
-        }
-        
-        // Persist values occasionally (every minute)
-        // Check now - previousUpdate (delta) to ensure we're not saving too aggressively if this is called more often.
-        if ((now - previousUpdate) >= TimeUnit.MINUTES.toMillis(1)) {
-            SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
-            SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get())
-            SettingsManager.setGoodAppAccumulatedMs(this, bucketGoodAppAccumulatedMs.get())
-        }
+        // ---------------- Token bucket update ----------------
+        // The TokenBucket now owns its state and fetches current settings automatically
+        val newRemaining = tokenBucket.update(appState = currentAppState)
 
         // If bucket just transitioned from empty (<=0) to full (== max), archive & clear
-        val maxThresholdMs = config.maxThresholdMs
-        val becameFull = oldRemaining <= 0L && updateResult.newRemainingMs >= maxThresholdMs
+        val becameFull = newRemaining >= SettingsManager.getMaxThreshold(this)
         if (becameFull && isCurrentlyWasteful) {
             Log.i(TAG, "Token bucket refilled to full while wasteful: archiving and clearing conversation.")
             EventLogStore.logBucketRefilledAndReset()
@@ -812,7 +756,7 @@ class AppUsageMonitorService : Service() {
         )
     }
 
-    private fun showConversationNotification(appName: String = "Unknown App", sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
+    private fun showConversationNotification(appName: String = "Unknown App", sessionTime: Duration = Duration.ZERO, dailyTime: Duration = Duration.ZERO) {
         Log.d(TAG, "showConversationNotification called. History size: ${conversationHistoryManager.getUserVisibleHistory().size}")
         // Never show conversation notifications when device is locked or screen off
         if (isDeviceLockedOrScreenOff()) {
@@ -830,8 +774,8 @@ class AppUsageMonitorService : Service() {
         val replyIntent = Intent(this, AppUsageMonitorService::class.java).apply {
             action = ACTION_HANDLE_REPLY
             putExtra(EXTRA_APP_NAME, appName)
-            putExtra(EXTRA_SESSION_TIME_MS, sessionTimeMs)
-            putExtra(EXTRA_DAILY_TIME_MS, dailyTimeMs)
+            putExtra(EXTRA_SESSION_TIME_MS, sessionTime.inWholeMilliseconds)
+            putExtra(EXTRA_DAILY_TIME_MS, dailyTime.inWholeMilliseconds)
         }
         val replyPendingIntent: PendingIntent = PendingIntent.getService(this, NOTIFICATION_ID, replyIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
         val action: NotificationCompat.Action = NotificationCompat.Action.Builder(R.mipmap.ic_launcher, "Reply", replyPendingIntent)
@@ -881,25 +825,14 @@ class AppUsageMonitorService : Service() {
         } else {
             "No distracting app active"
         }
-        val maxThresholdMs = TimeUnit.MINUTES.toMillis(
-            SettingsManager.getMaxThresholdMinutes(this).toLong()
-        )
-        val bucketRemaining = bucketRemainingMs.get()
-        val bucketText = if (bucketRemaining < maxThresholdMs) {
-            "Bucket: ${formatDuration(bucketRemaining)} remaining"
+        val maxThreshold = SettingsManager.getMaxThreshold(this)
+        val bucketRemaining = tokenBucket.getCurrentRemaining()
+        val maxOverfill = SettingsManager.getMaxOverfill(this)
+        val bucketText = if (bucketRemaining < maxThreshold) {
+            "Bucket: ${bucketRemaining} min remaining"
         } else {
-            "Bucket: full"
-        }
-        
-        // Bonus bucket (good app accumulator) text
-        val goodAppAccumulated = bucketGoodAppAccumulatedMs.get()
-        val goodAppRewardIntervalMs = TimeUnit.MINUTES.toMillis(
-            SettingsManager.getGoodAppRewardIntervalMinutes(this).toLong()
-        )
-        val bonusBucketText = if (goodAppAccumulated > 0L && goodAppRewardIntervalMs > 0L) {
-            "Bonus: ${formatDuration(goodAppAccumulated)} / ${formatDuration(goodAppRewardIntervalMs)}"
-        } else {
-            null
+            val overfillAmount = bucketRemaining - maxThreshold
+            "Bucket: full${if (overfillAmount > 0) " (+${overfillAmount} min overfill)" else ""}"
         }
         
         // Calculate current app time when on a wasteful app
@@ -910,21 +843,18 @@ class AppUsageMonitorService : Service() {
             } else null
         } else null
         
-        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms, Bonus: ${goodAppAccumulated}ms")
+        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms")
         
-        // Build notification text with current app time when bucket is full
+        // Build notification text with current app time when bucket is being consumed
         val notificationText = buildString {
             appendLine(monitoringStatus)
             appendLine("Current: $currentAppName")
-            if (currentAppTime != null && bucketRemaining >= maxThresholdMs) {
+            if (currentAppTime != null && bucketRemaining < maxThreshold) {
                 appendLine(currentAppTime)
             }
-            appendLine("Session Time: ${formatDuration(sessionWastedTime.get())}")
-            appendLine("Daily Time: ${formatDuration(dailyWastedTime.get())}")
+            appendLine("Session Time: ${formatDuration(sessionWastedTime)}")
+            appendLine("Daily Time: ${formatDuration(dailyWastedTime)}")
             appendLine(bucketText)
-            if (bonusBucketText != null) {
-                appendLine(bonusBucketText)
-            }
         }
         
         val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)
@@ -1019,16 +949,22 @@ class AppUsageMonitorService : Service() {
             }
         }
     }
-
-    private fun formatDuration(millis: Long): String {
-        val seconds = millis / 1000
-        val minutes = seconds / 60
-        val hours = minutes / 60
-        return when {
-            hours > 0 -> "$hours h ${minutes % 60} min"
-            minutes > 0 -> "$minutes min ${seconds % 60} s"
-            else -> "$seconds s"
+    private fun formatDuration(duration: Duration): String {
+        val hours = duration.inWholeHours
+        val minutes = duration.inWholeMinutes % 60
+        val seconds = duration.inWholeSeconds % 60
+        val res = buildString {
+            if (hours > 0) {
+                append("$hours h ")
+            }
+            if (minutes > 0) {
+                append("$minutes m ")
+            }
+            if (seconds > 0) {
+                append("$seconds s")
+            }
         }
+        return res
     }
 
     private fun getStartOfDay(): Long {
@@ -1053,8 +989,7 @@ class AppUsageMonitorService : Service() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
         // Persist bucket value so it survives service restarts
-        SettingsManager.setThresholdRemainingMs(this, bucketRemainingMs.get())
-        SettingsManager.setAccumulatedNonWastefulMs(this, bucketAccumulatedNonWastefulMs.get()) // Persist accumulator
+        tokenBucket.persistCurrentState()
         serviceScope.cancel()
         executor.shutdown()
         isMonitoringScheduled.set(false)

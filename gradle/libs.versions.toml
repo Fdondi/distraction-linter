@@ -12,6 +12,8 @@ composeBom = "2025.10.00"
 securityCrypto = "1.1.0-alpha06"
 generativeai = "0.9.0"
 kotlinxCoroutines = "1.7.3"
+kotlinxSerialization = "1.6.3"
+kotlinxDatetime = "0.5.0"
 runtime = "1.9.0"
 
 [libraries]
@@ -33,6 +35,8 @@ androidx-material3 = { group = "androidx.compose.material3", name = "material3" 
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 google-ai-client-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version = "2.7.7" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version = "1.6.7" }
 androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
@@ -41,4 +45,5 @@ androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 

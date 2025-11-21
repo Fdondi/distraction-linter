@@ -1,5 +1,7 @@
 package com.example.timelinter
 
+import kotlin.time.Duration
+
 // Shared tool data types used by function-calling path
 
 data class ParsedResponse(
@@ -8,8 +10,8 @@ data class ParsedResponse(
 )
 
 sealed class ToolCommand {
-    data class Allow(val minutes: Int, val app: String? = null) : ToolCommand()
-    data class Remember(val content: String, val durationMinutes: Int? = null) : ToolCommand()
+    data class Allow(val duration: Duration, val app: String? = null) : ToolCommand()
+    data class Remember(val content: String, val duration: Duration? = null) : ToolCommand()
 }
 
 

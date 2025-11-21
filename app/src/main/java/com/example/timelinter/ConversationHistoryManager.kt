@@ -6,6 +6,8 @@ import androidx.core.app.Person
 import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.content
 import java.util.Date
+import kotlin.time.Duration
+import kotlinx.datetime.Instant
 
 class UserConversationHistory(private val coachName: String = "Adam") {
     private val conversation = mutableListOf<ChatMessage>()
@@ -55,7 +57,8 @@ class APIConversationHistory(
     private val systemPrompt: String,
     private val aiMemoryTemplate: String,
     private val userInfoTemplate: String,
-    private val userInteractionTemplate: String
+    private val userInteractionTemplate: String,
+    private val timeProvider: TimeProvider
 ) {
     private val TAG = "APIChatHistoryManager"
 
@@ -63,12 +66,12 @@ class APIConversationHistory(
 
     fun getHistory(): List<Content> = conversation.toList()
 
-    fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+    fun addUserMessage(messageText: String, currentAppName: String, sessionTime: Duration, dailyTime: Duration) {
         val contextualizedUserMessage = userInteractionTemplate
-            .replace("{{CURRENT_TIME_AND_DATE}}", Date().toString())
+            .replace("{{CURRENT_TIME_AND_DATE}}", timeProvider.now().toString())
             .replace("{{APP_NAME}}", currentAppName)
-            .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
-            .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
+            .replace("{{SESSION_TIME}}", formatDuration(sessionTime))
+            .replace("{{DAILY_TIME}}", formatDuration(dailyTime))
             .replace("{{USER_MESSAGE}}", messageText)
         
         conversation.add(content(role = "user") { text(contextualizedUserMessage) })
@@ -91,7 +94,7 @@ class APIConversationHistory(
         logHistory()
     }
 
-    fun initializeConversation(appName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+    fun initializeConversation(appName: String, sessionTime: Duration, dailyTime: Duration) {
         conversation.clear()
         
         // Step 1: Add system prompt (undecorated)
@@ -171,10 +174,10 @@ class APIConversationHistory(
         
         // Decorate with app statistics like regular user messages
         val decoratedUserStatus = userInteractionTemplate
-            .replace("{{CURRENT_TIME_AND_DATE}}", Date().toString())
+            .replace("{{CURRENT_TIME_AND_DATE}}", timeProvider.now().toString())
             .replace("{{APP_NAME}}", appName)
-            .replace("{{SESSION_TIME}}", formatDuration(sessionTimeMs))
-            .replace("{{DAILY_TIME}}", formatDuration(dailyTimeMs))
+            .replace("{{SESSION_TIME}}", formatDuration(sessionTime))
+            .replace("{{DAILY_TIME}}", formatDuration(dailyTime))
             .replace("{{USER_MESSAGE}}", userStatusMessage)
         
         conversation.add(content(role = "user") { text(decoratedUserStatus) })
@@ -198,8 +201,8 @@ class APIConversationHistory(
         }
     }
 
-    private fun formatDuration(millis: Long): String {
-        val seconds = millis / 1000
+    private fun formatDuration(millis: Duration): String {
+        val seconds = millis.inWholeSeconds
         val minutes = seconds / 60
         val hours = minutes / 60
         return when {
@@ -215,13 +218,14 @@ class ConversationHistoryManager(
     private val systemPrompt: String,
     private val aiMemoryTemplate: String,
     private val userInfoTemplate: String,
-    private val userInteractionTemplate: String
+    private val userInteractionTemplate: String,
+    private val timeProvider: TimeProvider
 ) {
     private val TAG = "ConvHistoryManager"
     private val coachName = ApiKeyManager.getCoachName(context)
     private val userConversationHistory = UserConversationHistory(coachName)
     private val apiConversationHistory = APIConversationHistory(
-        context, systemPrompt, aiMemoryTemplate, userInfoTemplate, userInteractionTemplate
+        context, systemPrompt, aiMemoryTemplate, userInfoTemplate, userInteractionTemplate, timeProvider
     )
     
     // Track how many messages we've published to avoid duplication
@@ -234,7 +238,7 @@ class ConversationHistoryManager(
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
-    fun startNewSession(appName: String, sessionTimeMs: Long = 0L, dailyTimeMs: Long = 0L) {
+    fun startNewSession(appName: String, sessionTime: Duration = Duration.ZERO, dailyTime: Duration = Duration.ZERO) {
         Log.i(TAG, "Starting new session for $appName")
         EventLogStore.logSessionStarted(appName)
         
@@ -248,7 +252,7 @@ class ConversationHistoryManager(
         publishedMessageCount = 0
         
         // Initialize API conversation with the 3-step process from interaction.md
-        apiConversationHistory.initializeConversation(appName, sessionTimeMs, dailyTimeMs)
+        apiConversationHistory.initializeConversation(appName, sessionTime, dailyTime)
         
         // Note: The initial conversation is NOT added to user-visible history
         // as per interaction.md: "This initial conversation will be added to the AI history 
@@ -260,17 +264,17 @@ class ConversationHistoryManager(
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
-    fun addUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+    fun addUserMessage(messageText: String, currentAppName: String, sessionTime: Duration, dailyTime: Duration) {
         userConversationHistory.addUserMessage(messageText)
-        apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
+        apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTime, dailyTime)
         EventLogStore.logMessage("user", messageText)
         publishApiHistory()
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
 
     // Adds a user message ONLY to API history (not shown in user-visible chat)
-    fun addApiOnlyUserMessage(messageText: String, currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
-        apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTimeMs, dailyTimeMs)
+    fun addApiOnlyUserMessage(messageText: String, currentAppName: String, sessionTime: Duration, dailyTime: Duration) {
+        apiConversationHistory.addUserMessage(messageText, currentAppName, sessionTime, dailyTime)
         publishApiHistory()
         ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
     }
@@ -285,17 +289,17 @@ class ConversationHistoryManager(
     // Log tool usage to API history only (hidden from user-visible chat)
     fun addToolLog(tool: ToolCommand) {
         val note = when (tool) {
-            is ToolCommand.Allow -> "🔧 TOOL CALLED: allow(${tool.minutes}${tool.app?.let { ", \"$it\"" } ?: ""}) - This tool call was made alongside the previous model response"
-            is ToolCommand.Remember -> "🔧 TOOL CALLED: remember(\"${tool.content}\"${tool.durationMinutes?.let { ", $it" } ?: ""}) - This tool call was made alongside the previous model response"
+            is ToolCommand.Allow -> "🔧 TOOL CALLED: allow(${tool.duration}${tool.app?.let { ", \"$it\"" } ?: ""}) - This tool call was made alongside the previous model response"
+            is ToolCommand.Remember -> "🔧 TOOL CALLED: remember(\"${tool.content}\"${tool.duration?.let { ", $it" } ?: ""}) - This tool call was made alongside the previous model response"
         }
         apiConversationHistory.addModelNote(note)
         EventLogStore.logTool(tool)
         publishApiHistory()
     }
 
-    fun addNoResponseMessage(currentAppName: String, sessionTimeMs: Long, dailyTimeMs: Long) {
+    fun addNoResponseMessage(currentAppName: String, sessionTime: Duration, dailyTime: Duration) {
         // Add "*no response*" to AI conversation only (decorated), not to UI
-        apiConversationHistory.addUserMessage("*no response*", currentAppName, sessionTimeMs, dailyTimeMs)
+        apiConversationHistory.addUserMessage("*no response*", currentAppName, sessionTime, dailyTime)
         Log.d(TAG, "Added '*no response*' to API history only")
         publishApiHistory()
     }

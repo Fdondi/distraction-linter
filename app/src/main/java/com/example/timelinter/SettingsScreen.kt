@@ -306,7 +306,7 @@ fun SettingsScreen(
                                     Slider(
                                         value = observeTimerMinutes.toFloat(),
                                         onValueChange = { 
-                                            observeTimerMinutes = it.toInt()
+                                            observeTimerMinutes = it.toFloat()
                                             SettingsManager.setObserveTimerMinutes(context, observeTimerMinutes)
                                             // Also update replenish interval to match observe timer
                                             SettingsManager.setReplenishIntervalMinutes(context, observeTimerMinutes)

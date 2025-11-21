@@ -25,7 +25,7 @@ Entrypoint and UI
 
 - app/src/main/java/com/example/timelinter/TimerSettingsScreen.kt
   - Configures monitoring thresholds/timers.
-  - Includes good apps reward settings (reward interval, reward amount, max overfill, decay rate).
+  - Includes unified bucket settings (fill rate multipliers for good/neutral apps, max overfill, decay rate).
 
 - app/src/main/java/com/example/timelinter/GoodAppSelectionScreen.kt
   - Screen for selecting beneficial apps that provide time rewards.
@@ -43,10 +43,10 @@ Background Services and Flow
     - Stops monitoring when screen turns off to avoid stale context
     - On unlock (ACTION_USER_PRESENT, ACTION_SCREEN_ON, ACTION_USER_UNLOCKED): immediately runs `mainInteractionLoop()` to check current app and refill bucket based on time passed
     - TokenBucket automatically accounts for time gaps, refilling based on elapsed time during unlock
-  - Good Apps integration:
-    - Tracks `bucketGoodAppAccumulatedMs` for reward accumulation
-    - Passes `isCurrentlyGoodApp` to TokenBucket.update()
-    - Applies good app rewards and overfill decay through TokenBucket
+  - Unified bucket system:
+    - Single bucket that can overfill beyond max threshold when using good apps
+    - Passes `isCurrentlyGoodApp` to TokenBucket.update() for faster filling
+    - Applies overfill decay during neutral use through TokenBucket
     - Private `AppInfo` includes `isGoodApp` field
 
 Reset Event (Bucket Refilled to Full)
@@ -109,12 +109,11 @@ Memory and Settings
 
 - app/src/main/java/com/example/timelinter/SettingsManager.kt
   - Reads/writes app settings not covered elsewhere.
-  - Good Apps settings:
-    - `getMaxOverfillMinutes` / `setMaxOverfillMinutes` - maximum bonus time (default: 30 min)
+  - Unified bucket settings:
+    - `getMaxOverfillMinutes` / `setMaxOverfillMinutes` - maximum overfill beyond normal limit (default: 30 min)
     - `getOverfillDecayPerHourMinutes` / `setOverfillDecayPerHourMinutes` - overfill decay rate (default: 10 min/hr)
-    - `getGoodAppRewardIntervalMinutes` / `setGoodAppRewardIntervalMinutes` - interval to earn rewards (default: 5 min)
-    - `getGoodAppRewardAmountMinutes` / `setGoodAppRewardAmountMinutes` - reward amount (default: 10 min)
-    - `getGoodAppAccumulatedMs` / `setGoodAppAccumulatedMs` - persistence for reward accumulator
+    - `getGoodAppFillRateMultiplier` / `setGoodAppFillRateMultiplier` - fill rate multiplier for good apps (default: 2.0x)
+    - `getNeutralAppFillRateMultiplier` / `setNeutralAppFillRateMultiplier` - fill rate multiplier for neutral apps (default: 1.0x)
 
 - app/src/main/java/com/example/timelinter/ApiKeyManager.kt
   - Stores API key, coach name, and user notes.
@@ -160,8 +159,8 @@ Wasteful Apps, Good Apps, and Token Bucket
     - Overfilling beyond normal max threshold
     - Time rewards for using good apps
     - Decay of overfill over time
-  - `TokenBucketConfig` includes good app parameters: maxOverfillMs, overfillDecayPerHourMs, goodAppRewardIntervalMs, goodAppRewardAmountMs
-  - `TokenBucketUpdateResult` includes goodAppAccumulatedMs for tracking reward progress.
+  - `TokenBucketConfig` includes unified parameters: maxOverfillMs, overfillDecayPerHourMs, goodAppFillRateMultiplier, neutralAppFillRateMultiplier
+  - `TokenBucketUpdateResult` returns only the new remaining time (no separate accumulators needed).
 
 Prompts and Templates
 - app/src/main/java/com/example/timelinter/TemplateManager.kt
