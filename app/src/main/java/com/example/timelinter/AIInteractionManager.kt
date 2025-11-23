@@ -8,8 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
-import com.example.timelinter.ApiKeyManager
+import kotlin.time.Duration.Companion.milliseconds
 
 /*
 AI interaction model:
@@ -24,9 +23,9 @@ Then keep updating the conversation this way, one AI and one user message.
 class AIInteractionManager(
     private val context: Context,
     private val conversationHistoryManager: ConversationHistoryManager,
-    private val defaultTask: AITask = AITask.FIRST_MESSAGE
+    defaultTask: AITask = AITask.FIRST_MESSAGE
 ) {
-    private val TAG = "AIInteractionManager"
+    private val tag = "AIInteractionManager"
     private var generativeModel: GenerativeModel? = null
     private var currentTask: AITask = defaultTask
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -46,13 +45,13 @@ class AIInteractionManager(
                     // Add safetySettings and generationConfig if needed
                 )
                 currentTask = task
-                Log.i(TAG, "GenerativeModel initialized successfully with model ${modelConfig.modelName} for task ${task.displayName}.")
+                Log.i(tag, "GenerativeModel initialized successfully with model ${modelConfig.modelName} for task ${task.displayName}.")
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing GenerativeModel", e)
+                Log.e(tag, "Error initializing GenerativeModel", e)
                 // Consider how to handle this error - e.g., notify user, disable AI features
             }
         } else {
-            Log.e(TAG, "API Key not found. GenerativeModel cannot be initialized.")
+            Log.e(tag, "API Key not found. GenerativeModel cannot be initialized.")
             // Handle missing API key - e.g., prompt user in UI
         }
     }
@@ -60,7 +59,7 @@ class AIInteractionManager(
     fun getInitializedModel(task: AITask = currentTask): GenerativeModel? {
         // Re-initialize if task changed or model is null
         if (generativeModel == null || task != currentTask) {
-            Log.w(TAG, "getInitializedModel called - reinitializing for task ${task.displayName}.")
+            Log.w(tag, "getInitializedModel called - reinitializing for task ${task.displayName}.")
             initializeModel(task)
         }
         return generativeModel
@@ -71,7 +70,7 @@ class AIInteractionManager(
      */
     fun switchTask(task: AITask) {
         if (task != currentTask) {
-            Log.i(TAG, "Switching from ${currentTask.displayName} to ${task.displayName}")
+            Log.i(tag, "Switching from ${currentTask.displayName} to ${task.displayName}")
             initializeModel(task)
         }
     }
@@ -91,7 +90,7 @@ class AIInteractionManager(
                 val response = currentModel.generateContent(*contents.toTypedArray())
                 onResponse(response)
             } catch (e: Exception) {
-                Log.e(TAG, "Error calling AI API (custom contents)", e)
+                Log.e(tag, "Error calling AI API (custom contents)", e)
                 onResponse(null)
             }
         }
@@ -105,7 +104,7 @@ class AIInteractionManager(
         task: AITask = AITask.FOLLOWUP_NO_RESPONSE
     ) {
         val currentModel = getInitializedModel(task) ?: run {
-            Log.e(TAG, "generateSubsequentResponse: GenerativeModel not initialized.")
+            Log.e(tag, "generateSubsequentResponse: GenerativeModel not initialized.")
             onResponse("(Error: AI not ready for subsequent response)")
             return
         }
@@ -121,18 +120,18 @@ class AIInteractionManager(
         conversationHistoryManager.addUserMessage(
             messageText = contextualPromptForAPI, // This will appear in UI, needs fix
             currentAppName = appName, 
-            sessionTimeMs = sessionTimeMs, 
-            dailyTimeMs = dailyTimeMs
+            sessionTime = sessionTimeMs.milliseconds,
+            dailyTime = dailyTimeMs.milliseconds
         )
 
         val apiContents = conversationHistoryManager.getHistoryForAPI()
         if (apiContents.isEmpty()) {
-            Log.e(TAG, "generateSubsequentResponse: API history is empty. Cannot make API call.")
+            Log.e(tag, "generateSubsequentResponse: API history is empty. Cannot make API call.")
             onResponse("(Error: AI history empty for subsequent response)")
             return
         }
 
-        Log.d(TAG, "generateSubsequentResponse: Sending to AI. API History size: ${apiContents.size}")
+        Log.d(tag, "generateSubsequentResponse: Sending to AI. API History size: ${apiContents.size}")
 
         serviceScope.launch {
             var aiResponseText: String? = null
@@ -142,16 +141,16 @@ class AIInteractionManager(
                 val response: GenerateContentResponse = currentModel.generateContent(*apiContents.toTypedArray())
                 aiResponseText = response.text
                 if (aiResponseText == null) {
-                    Log.w(TAG, "Gemini response (subsequent) was null text.")
+                    Log.w(tag, "Gemini response (subsequent) was null text.")
                     errorMessage = "(AI gave an empty response)"
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API for subsequent response", e)
+                Log.e(tag, "Error calling Gemini API for subsequent response", e)
                 errorMessage = "(API Error: ${e.message})"
             }
 
             val messageToSend = aiResponseText ?: errorMessage ?: "(Unknown error from AI)"
-            Log.i(TAG, "Processed AI Response (subsequent): $messageToSend")
+            Log.i(tag, "Processed AI Response (subsequent): $messageToSend")
             onResponse(messageToSend)
         }
     }
@@ -183,36 +182,36 @@ class AIInteractionManager(
             val apiContents = conversationHistoryManager.getHistoryForAPI()
 
             if (apiContents.isEmpty()) {
-                Log.e(TAG, "generateResponse: API history from ConversationHistoryManager is empty. Cannot make API call.")
+                Log.e(tag, "generateResponse: API history from ConversationHistoryManager is empty. Cannot make API call.")
                 onResponse("(Error: AI Interaction - No content to send)")
                 return@launch
             }
             
-            Log.d(TAG, "--- AIInteractionManager: Sending to Gemini (History from Manager) ---")
+            Log.d(tag, "--- AIInteractionManager: Sending to Gemini (History from Manager) ---")
             apiContents.forEachIndexed { idx, content ->
                  val textPreview = content.parts.joinToString { part ->
                     if (part is com.google.ai.client.generativeai.type.TextPart) {
-                        part.text.take(70).replace("\n", " ")
+                        part.text.take(70).replace("", " ")
                     } else {
                         part.toString().take(70)
                     }
                 }.let { if (it.length > 70) it.substring(0, 70) + "..." else it }
-                Log.d(TAG, "APIContent[$idx]: role=${content.role}, text='$textPreview'")
+                Log.d(tag, "APIContent[$idx]: role=${content.role}, text='$textPreview'")
             }
-            Log.d(TAG, "--- End of AIInteractionManager: API Request Contents ---")
+            Log.d(tag, "--- End of AIInteractionManager: API Request Contents ---")
 
             try {
                 val response = currentModel.generateContent(*apiContents.toTypedArray())
                 aiResponseText = response.text
-                Log.d(TAG, "Raw Gemini Response: $aiResponseText")
+                Log.d(tag, "Raw Gemini Response: $aiResponseText")
 
                 if (aiResponseText == null) {
-                    Log.w(TAG, "Gemini response was null.")
+                    Log.w(tag, "Gemini response was null.")
                     errorMessage = "(Error getting AI response: Null text)"
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Error calling Gemini API", e)
+                Log.e(tag, "Error calling Gemini API", e)
                 errorMessage = "(API Error: ${e.message})"
             }
 
@@ -220,4 +219,4 @@ class AIInteractionManager(
             onResponse(result)
         }
     }
-} 
+}

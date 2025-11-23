@@ -61,19 +61,19 @@ object EventLogStore {
             is ToolCommand.Allow -> {
                 label = "Tool: allow"
                 val appPart = tool.app?.let { ", app=\"$it\"" } ?: ""
-                details = "Granted ${tool.minutes} minutes$appPart"
+                details = "Granted ${tool.duration.inWholeMinutes} minutes$appPart"
             }
             is ToolCommand.Remember -> {
                 label = "Tool: remember"
-                val dur = tool.durationMinutes?.let { ", minutes=$it" } ?: ""
+                val dur = tool.duration?.inWholeMinutes?.let { ", minutes=$it" } ?: ""
                 details = "\"${tool.content}\"$dur"
             }
         }
         addEvent(EventType.TOOL, label, details)
     }
 
-    fun logStateChange(newState: InteractionState) {
-        addEvent(EventType.STATE, "State changed", newState.name)
+    fun logStateChange(stateName: String) {
+        addEvent(EventType.STATE, "State changed", stateName)
     }
 
     fun logSessionStarted(appName: String) {

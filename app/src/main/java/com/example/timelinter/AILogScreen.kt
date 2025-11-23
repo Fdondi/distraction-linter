@@ -13,12 +13,23 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.toLocalDateTime
 // Use fully qualified types to avoid import resolution issues in some environments
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.datetime.TimeZone // Make sure this import is present
+import kotlinx.datetime.format
+import kotlinx.datetime.format.DateTimeFormat
+import kotlinx.datetime.format.Padding
+import kotlinx.datetime.format.byUnicodePattern
+import kotlinx.datetime.format.char
+import kotlinx.datetime.toLocalDateTime
+import java.time.LocalDate
+import kotlin.time.ExperimentalTime
 
+@OptIn(ExperimentalTime::class)
 @Composable
 fun AILogScreen(
     onNavigateBack: () -> Unit
@@ -94,10 +105,12 @@ fun AILogScreen(
                     .fillMaxWidth()
                     .padding(bottom = 16.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)) {
                     if (!isEditing) {
                         Text(
-                            text = if (aiMemory.isBlank()) "(No AI memory yet)" else aiMemory,
+                            text = aiMemory.ifBlank { "(No AI memory yet)" },
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(Modifier.height(12.dp))
@@ -143,7 +156,19 @@ fun AILogScreen(
 
             // Temporary memory groups
             Text(text = "Temporary AI Memory", style = MaterialTheme.typography.titleMedium)
-            val dateFormatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd") }
+            val dateTimeFormatter = remember {
+                LocalDateTime.Format {
+                    year()
+                    char('-')
+                    monthNumber(padding = Padding.ZERO)
+                    char('-')
+                    day(padding = Padding.ZERO)
+                    char(' ')
+                    hour(padding = Padding.ZERO)
+                    char(':')
+                    minute(padding = Padding.ZERO)
+                }
+            }
             tempGroups.forEach { group ->
                 Card(
                     modifier = Modifier
@@ -152,8 +177,14 @@ fun AILogScreen(
                         .testTag("tempMemoryGroup-${group.expirationDateKey}")
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        val labelDate = LocalDate.parse(group.expirationDateKey)
-                        Text("Expires on ${labelDate.format(dateFormatter)}", style = MaterialTheme.typography.titleSmall)
+                        // 1. This part is already correct
+                        val localDateTime = group.expirationDateKey.toLocalDateTime(timeZone = TimeZone.currentSystemDefault())
+
+                        // 2. Format using the correct kotlinx formatter. This now works.
+                        Text(
+                            "Expires on ${localDateTime.format(dateTimeFormatter)}",
+                            style = MaterialTheme.typography.titleSmall
+                        )
                         Spacer(Modifier.height(8.dp))
                         group.items.forEach { item ->
                             Text("• $item", style = MaterialTheme.typography.bodyMedium)

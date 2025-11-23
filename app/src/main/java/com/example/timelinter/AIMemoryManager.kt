@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
 import android.content.Context
@@ -5,18 +7,20 @@ import android.content.SharedPreferences
 import android.util.Log
 import kotlinx.datetime.*
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
+import androidx.core.content.edit
+import kotlin.time.Instant
 
 @Serializable
 data class MemoryItem(
     val content: String,
-    val createdAt: Instant,
-    val expiresAt: Instant? = null // null means permanent memory
+    val createdAt: kotlin.time.Instant,
+    val expiresAt: kotlin.time.Instant? = null // null means permanent memory
     
 ) {
-    fun isExpiredAt(now: Instant): Boolean {
+    fun isExpiredAt(now: kotlin.time.Instant): Boolean {
         return expiresAt != null && now >= expiresAt
     }
 }
@@ -41,7 +45,7 @@ object AIMemoryManager {
         } else {
             "$existing\n$content"
         }
-        prefs.edit().putString(PERMANENT_MEMORY_KEY, updated).apply()
+        prefs.edit { putString(PERMANENT_MEMORY_KEY, updated) }
         Log.d(TAG, "Added permanent memory: $content")
     }
 
@@ -52,13 +56,13 @@ object AIMemoryManager {
 
         val memoryItem = MemoryItem(content, timeProvider.now(), expiresAt)
         val serialized = Json.encodeToString(memoryItem)
-        prefs.edit().putString(key, serialized).apply()
+        prefs.edit { putString(key, serialized) }
         Log.d(TAG, "Added temporary memory for $duration: $content")
     }
 
     fun setPermanentMemory(context: Context, content: String) {
         val prefs = getPreferences(context)
-        prefs.edit().putString(PERMANENT_MEMORY_KEY, content).apply()
+        prefs.edit { putString(PERMANENT_MEMORY_KEY, content) }
         Log.d(TAG, "Set permanent memory (replaced): ${content.take(64)}")
     }
 
@@ -81,12 +85,12 @@ object AIMemoryManager {
     }
 
     fun setMemoryRules(context: Context, rules: String) {
-        getPreferences(context).edit().putString(MEMORY_RULES_KEY, rules).apply()
+        getPreferences(context).edit { putString(MEMORY_RULES_KEY, rules) }
         Log.d(TAG, "Updated memory rules (${rules.length} chars)")
     }
 
     data class TemporaryGroupByDate(
-        val expirationDateKey: Instant,
+        val expirationDateKey: kotlin.time.Instant,
         val items: List<String>
     )
 
@@ -135,36 +139,36 @@ object AIMemoryManager {
         }
 
         // Add valid temporary memories and clean up expired ones
-        val editor = prefs.edit()
-        val allPrefs = prefs.all
-        
-        for ((key, value) in allPrefs) {
-            if (key.startsWith(TEMPORARY_MEMORY_PREFIX) && value is String) {
-                try {
-                    val memoryItem = Json.decodeFromString<MemoryItem>(value)
-                    if (!memoryItem.isExpiredAt(timeProvider.now())) {
-                        // Still valid
-                        memories.add(memoryItem.content)
-                    } else {
-                        // Expired, remove it
-                        editor.remove(key)
-                        Log.d(TAG, "Removed expired memory: ${memoryItem.content}")
+        prefs.edit {
+            val allPrefs = prefs.all
+
+            for ((key, value) in allPrefs) {
+                if (key.startsWith(TEMPORARY_MEMORY_PREFIX) && value is String) {
+                    try {
+                        val memoryItem = Json.decodeFromString<MemoryItem>(value)
+                        if (!memoryItem.isExpiredAt(timeProvider.now())) {
+                            // Still valid
+                            memories.add(memoryItem.content)
+                        } else {
+                            // Expired, remove it
+                            remove(key)
+                            Log.d(TAG, "Removed expired memory: ${memoryItem.content}")
+                        }
+                    } catch (e: Exception) {
+                        // If deserialization fails, remove the corrupted entry
+                        remove(key)
+                        Log.w(TAG, "Removed corrupted memory entry: $key")
                     }
-                } catch (e: Exception) {
-                    // If deserialization fails, remove the corrupted entry
-                    editor.remove(key)
-                    Log.w(TAG, "Removed corrupted memory entry: $key")
                 }
             }
+
         }
-        
-        editor.apply()
         
         return memories.joinToString("\n")
     }
 
     fun clearAllMemories(context: Context) {
-        getPreferences(context).edit().clear().apply()
+        getPreferences(context).edit { clear() }
         Log.d(TAG, "Cleared all memories")
     }
 } 

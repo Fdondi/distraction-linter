@@ -1,14 +1,11 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
 import android.content.Context
-import java.util.concurrent.TimeUnit
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.time.Duration
-import kotlinx.datetime.Instant
-import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 data class TokenBucketConfig(
     val context: Context,
@@ -43,7 +40,7 @@ enum class AppState {
             val fillRateMultiplier = SettingsManager.getGoodAppFillRateMultiplier(config.context)
             if (fillRateMultiplier <= 0.0f)
                 return currentRemaining
-            val fillDuration = delta * fillRateMultiplier
+            val fillDuration = delta * fillRateMultiplier.toDouble()
             val maxTotal = config.maxThreshold + config.maxOverfill
             val replenishmentRate = fillDuration / config.replenishInterval
             val actualReplenishment = config.replenishAmount * replenishmentRate
@@ -108,7 +105,8 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         // Use the app state's update method
         val delta = timeProvider.now() - lastUpdate
         lastUpdate = timeProvider.now()
-        return appState.updateRemainingTime(currentRemaining, delta, config)
+        val newRemaining = appState.updateRemainingTime(currentRemaining, delta, config)
+        return clampWithOverfill(newRemaining, config)
     }
 
     private fun getCurrentConfig(): TokenBucketConfig {

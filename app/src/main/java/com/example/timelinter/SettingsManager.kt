@@ -6,6 +6,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.DurationUnit
 import kotlin.time.toDuration
+import androidx.core.content.edit
 
 object SettingsManager {
     private const val PREF_NAME = "timelinter_settings"
@@ -46,7 +47,12 @@ object SettingsManager {
         return getPreferences(context).getInt(OBSERVE_TIMER_MINUTES_KEY, DEFAULT_OBSERVE_TIMER_MINUTES).minutes
     }
     fun setObserveTimer(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(OBSERVE_TIMER_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                OBSERVE_TIMER_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     fun getResponseTimer(context: Context): Duration {
@@ -110,11 +116,19 @@ object SettingsManager {
         getPreferences(context).edit().putInt(OVERFILL_DECAY_PER_HOUR_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
     }
 
-    fun getGoodAppFillRateMultiplier(context: Context): Int {
-        return getPreferences(context).getInt(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, DEFAULT_GOOD_APP_FILL_RATE_MULTIPLIER)
+    fun getGoodAppFillRateMultiplier(context: Context): Float {
+        return getPreferences(context).getFloat(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, DEFAULT_GOOD_APP_FILL_RATE_MULTIPLIER.toFloat())
     }
 
-    fun setGoodAppFillRateMultiplier(context: Context, multiplier: Int) {
-        getPreferences(context).edit().putInt(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, multiplier).apply()
+    fun setGoodAppFillRateMultiplier(context: Context, multiplier: Float) {
+        getPreferences(context).edit().putFloat(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, multiplier).apply()
+    }
+
+    fun getNeutralAppFillRateMultiplier(context: Context): Float {
+        return getPreferences(context).getFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, 1.0f)
+    }
+
+    fun setNeutralAppFillRateMultiplier(context: Context, multiplier: Float) {
+        getPreferences(context).edit().putFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, multiplier).apply()
     }
 }

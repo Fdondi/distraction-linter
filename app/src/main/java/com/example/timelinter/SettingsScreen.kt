@@ -1,24 +1,49 @@
 package com.example.timelinter
 
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.minutes
 
 @Composable
 fun SettingsScreen(
@@ -30,11 +55,11 @@ fun SettingsScreen(
     var allApps by remember { mutableStateOf(listOf<AppInfo>()) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(0) }
-    
+
     // Timer settings
-    var observeTimerMinutes by remember { mutableStateOf(SettingsManager.getObserveTimerMinutes(context)) }
-    var responseTimerMinutes by remember { mutableStateOf(SettingsManager.getResponseTimerMinutes(context)) }
-    
+    var observeTimer by remember { mutableStateOf(SettingsManager.getObserveTimer(context)) }
+    var responseTimer by remember { mutableStateOf(SettingsManager.getResponseTimer(context)) }
+
     // Function to check if we can query packages
     fun canQueryPackages(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -96,10 +121,10 @@ fun SettingsScreen(
             // Only filter out our own app
             app.packageName != context.packageName
         }.sortedBy { it.appName }
-        
+
         Log.d("SettingsScreen", "Found ${installedApps.size} installed apps")
         allApps = installedApps
-        
+
         // Load saved selections or use defaults
         val savedSelections = TimeWasterAppManager.getSelectedApps(context)
         if (savedSelections.isEmpty()) {
@@ -151,7 +176,7 @@ fun SettingsScreen(
                 .padding(padding)
         ) {
             // Tab Row
-            TabRow(selectedTabIndex = selectedTab) {
+            PrimaryTabRow(selectedTabIndex = selectedTab) {
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -171,10 +196,10 @@ fun SettingsScreen(
                         AlertDialog(
                             onDismissRequest = { showPermissionDialog = false },
                             title = { Text("Permission Required") },
-                            text = { 
+                            text = {
                                 Text(
                                     "Time Linter needs permission to see your installed apps. " +
-                                    "Please grant this permission in your system settings to continue."
+                                            "Please grant this permission in your system settings to continue."
                                 )
                             },
                             confirmButton = {
@@ -251,10 +276,10 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f)
                     ) {
                         items(
-                            allApps.filter { 
+                            allApps.filter {
                                 it.packageName !in selectedApps &&
-                                (searchQuery.isEmpty() || 
-                                 it.appName.matchesSearch(searchQuery))
+                                        (searchQuery.isEmpty() ||
+                                                it.appName.matchesSearch(searchQuery))
                             }
                         ) { app ->
                             AppListItem(
@@ -297,19 +322,19 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
-                                
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    Text("${observeTimerMinutes} minutes")
+                                    Text("${observeTimer.inWholeMinutes} minutes")
                                     Slider(
-                                        value = observeTimerMinutes.toFloat(),
-                                        onValueChange = { 
-                                            observeTimerMinutes = it.toFloat()
-                                            SettingsManager.setObserveTimerMinutes(context, observeTimerMinutes)
+                                        value = observeTimer.inWholeMinutes.toFloat(),
+                                        onValueChange = {
+                                            observeTimer = it.roundToInt().minutes
+                                            SettingsManager.setObserveTimer(context, observeTimer)
                                             // Also update replenish interval to match observe timer
-                                            SettingsManager.setReplenishIntervalMinutes(context, observeTimerMinutes)
+                                            SettingsManager.setReplenishInterval(context, observeTimer)
                                         },
                                         valueRange = 1f..30f,
                                         steps = 28,
@@ -336,17 +361,17 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
-                                
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    Text("${responseTimerMinutes} minute${if (responseTimerMinutes > 1) "s" else ""}")
+                                    Text("${responseTimer.inWholeMinutes} minute${if (responseTimer.inWholeMinutes > 1) "s" else ""}")
                                     Slider(
-                                        value = responseTimerMinutes.toFloat(),
-                                        onValueChange = { 
-                                            responseTimerMinutes = it.toInt()
-                                            SettingsManager.setResponseTimerMinutes(context, responseTimerMinutes)
+                                        value = responseTimer.inWholeMinutes.toFloat(),
+                                        onValueChange = {
+                                            responseTimer = it.roundToInt().minutes
+                                            SettingsManager.setResponseTimer(context, responseTimer)
                                         },
                                         valueRange = 1f..10f,
                                         steps = 8,
@@ -363,7 +388,7 @@ fun SettingsScreen(
                             Column(
                                 modifier = Modifier.padding(16.dp)
                             ) {
-                                var maxThresholdMinutes by remember { mutableStateOf(SettingsManager.getMaxThresholdMinutes(context)) }
+                                var maxThreshold by remember { mutableStateOf(SettingsManager.getMaxThreshold(context)) }
                                 Text(
                                     text = "Max Allowed Minutes",
                                     style = MaterialTheme.typography.titleMedium
@@ -378,12 +403,12 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    Text("${maxThresholdMinutes} min")
+                                    Text("${maxThreshold.inWholeMinutes} min")
                                     Slider(
-                                        value = maxThresholdMinutes.toFloat(),
+                                        value = maxThreshold.inWholeMinutes.toFloat(),
                                         onValueChange = {
-                                            maxThresholdMinutes = it.toInt()
-                                            SettingsManager.setMaxThresholdMinutes(context, maxThresholdMinutes)
+                                            maxThreshold = it.roundToInt().minutes
+                                            SettingsManager.setMaxThreshold(context, maxThreshold)
                                         },
                                         valueRange = 1f..60f,
                                         steps = 59,
@@ -400,7 +425,7 @@ fun SettingsScreen(
                             Column(
                                 modifier = Modifier.padding(16.dp)
                             ) {
-                                var replenishAmountMinutes by remember { mutableStateOf(SettingsManager.getReplenishAmountMinutes(context)) }
+                                var replenishAmount by remember { mutableStateOf(SettingsManager.getReplenishAmount(context)) }
                                 Text(
                                     text = "Replenish Amount",
                                     style = MaterialTheme.typography.titleMedium
@@ -415,12 +440,12 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    Text("${replenishAmountMinutes} min")
+                                    Text("${replenishAmount.inWholeMinutes} min")
                                     Slider(
-                                        value = replenishAmountMinutes.toFloat(),
+                                        value = replenishAmount.inWholeMinutes.toFloat(),
                                         onValueChange = {
-                                            replenishAmountMinutes = it.toInt()
-                                            SettingsManager.setReplenishAmountMinutes(context, replenishAmountMinutes)
+                                            replenishAmount = it.roundToInt().minutes
+                                            SettingsManager.setReplenishAmount(context, replenishAmount)
                                         },
                                         valueRange = 1f..10f,
                                         steps = 9,
@@ -447,9 +472,9 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again (also used as the replenish interval)\n" +
-                                          "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up\n" +
-                                          "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)\n" +
-                                          "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer)",
+                                            "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up\n" +
+                                            "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)\n" +
+                                            "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -480,10 +505,7 @@ private fun AppListItem(
         )
         Text(
             text = app.appName,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
     }
-} 
+}

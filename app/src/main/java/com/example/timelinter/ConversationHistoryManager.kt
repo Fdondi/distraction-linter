@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
 import android.content.Context
@@ -7,7 +9,7 @@ import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.content
 import java.util.Date
 import kotlin.time.Duration
-import kotlinx.datetime.Instant
+import kotlin.time.ExperimentalTime
 
 class UserConversationHistory(private val coachName: String = "Adam") {
     private val conversation = mutableListOf<ChatMessage>()

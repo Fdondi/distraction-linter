@@ -1,5 +1,11 @@
 package com.example.timelinter
 
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
+
+
 object AllowIntentDetector {
     private val minutePattern = Regex("(\\d{1,3})\\s*(?:min|mins|minute|minutes)\\b", RegexOption.IGNORE_CASE)
 
@@ -35,10 +41,10 @@ object AllowIntentDetector {
             heuristicDurations.firstOrNull { it.first.containsMatchIn(modelMessage) }?.second ?: 10
         }
 
-        val sanitizedMinutes = minutes.coerceIn(1, 240)
+        val sanitizedMinutes = minutes.coerceIn(1, 240).minutes
 
         val app = currentAppReadableName?.takeIf { it.isNotBlank() }
-        return ToolCommand.Allow(minutes = sanitizedMinutes, app = app)
+        return ToolCommand.Allow(duration = sanitizedMinutes, app = app)
     }
 }
 

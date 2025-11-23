@@ -26,12 +26,12 @@ fun getApiKey(propertyKey: String): String {
 
 android {
     namespace = "com.example.timelinter"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.timelinter"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -53,6 +53,11 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+    }
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(11)
+        }
     }
     buildFeatures {
         compose = true
@@ -98,4 +103,6 @@ dependencies {
 
     // AndroidX Security for EncryptedSharedPreferences
     implementation(libs.androidx.security.crypto)
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")
+
 }

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
 import android.app.NotificationChannel
@@ -17,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import kotlinx.coroutines.*
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import com.example.timelinter.TimeProvider
 import com.example.timelinter.SystemTimeProvider
 import kotlin.time.DurationUnit
@@ -34,6 +37,8 @@ import com.google.ai.client.generativeai.type.GenerateContentResponse
 import android.content.Intent.ACTION_MAIN
 import android.content.Intent.CATEGORY_HOME
 import android.content.pm.PackageManager
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -71,7 +76,8 @@ class AppUsageMonitorService : Service() {
     private val statsUpdateIntervalSeconds = 30L // How often to update the stats notification
     private val checkIntervalSeconds = 10L // How often to check app usage for time tracking
 
-    private lateinit var timeProvider: TimeProvider
+    private var timeProvider: TimeProvider = SystemTimeProvider
+
     private var sessionStart: Instant = timeProvider.now()
     private var sessionWastedTime: Duration = Duration.ZERO
     private var dailyWastedTime: Duration = Duration.ZERO
@@ -163,7 +169,7 @@ class AppUsageMonitorService : Service() {
         Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
         try {
             // Schedule the main interaction loop
-            mainLoopFuture = executor.scheduleAtFixedRate({
+            mainLoopFuture = executor.scheduleWithFixedDelay({
                 try {
                     Log.v(TAG, "Scheduled task running: mainInteractionLoop")
                     mainInteractionLoop()
@@ -173,7 +179,7 @@ class AppUsageMonitorService : Service() {
             }, 0, checkIntervalSeconds, TimeUnit.SECONDS)
 
             // Schedule stats notification update less frequently
-             statsFuture = executor.scheduleAtFixedRate({
+             statsFuture = executor.scheduleWithFixedDelay({
                  try {
                     Log.d(TAG, "Scheduled task running: updateStatsNotification")
                     updateStatsNotification()
@@ -249,9 +255,7 @@ class AppUsageMonitorService : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                addAction(Intent.ACTION_USER_UNLOCKED)
-            }
+            addAction(Intent.ACTION_USER_UNLOCKED)
         }
         try {
             registerReceiver(screenStateReceiver, filter)
@@ -283,17 +287,18 @@ class AppUsageMonitorService : Service() {
         }
         updateTimeTracking(effectiveInfo)
         
-        val currentState = interactionStateManager.getCurrentState()
-        Log.v(TAG, "Main loop: State=$currentState, App=${effectiveInfo?.packageName}, Wasteful=${effectiveInfo?.isWasteful}")
+        val stateName = interactionStateManager.getStateName()
+        Log.v(TAG, "Main loop: State=$stateName, App=${effectiveInfo?.packageName}, Wasteful=${effectiveInfo?.isWasteful}")
         
-        when (currentState) {
-            InteractionState.OBSERVING -> {
+        // Use minimal API methods instead of pattern matching on internal state
+        when {
+            interactionStateManager.isInObservingState() -> {
                 handleObservingState(effectiveInfo)
             }
-            InteractionState.CONVERSATION_ACTIVE -> {
+            interactionStateManager.isInConversationState() -> {
                 handleConversationActiveState(effectiveInfo)
             }
-            InteractionState.WAITING_FOR_RESPONSE -> {
+            interactionStateManager.isWaitingForResponse() -> {
                 handleWaitingForResponseState(effectiveInfo)
             }
         }
@@ -518,12 +523,10 @@ class AppUsageMonitorService : Service() {
 
         try {
             // Check if user is unlocked (required for Android R+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                val userManager = getSystemService(USER_SERVICE) as UserManager
-                if (!userManager.isUserUnlocked) {
-                    Log.w(TAG, "User is locked, cannot query usage events")
-                    return null
-                }
+            val userManager = getSystemService(USER_SERVICE) as UserManager
+            if (!userManager.isUserUnlocked) {
+                Log.w(TAG, "User is locked, cannot query usage events")
+                return null
             }
 
             // If device is locked or screen is not interactive, treat as no foreground app
@@ -636,6 +639,7 @@ class AppUsageMonitorService : Service() {
         // ---------------- Existing time tracking logic ----------------
 
         // App change detection and time accumulation logic
+        val now = timeProvider.now()
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
              
@@ -649,37 +653,37 @@ class AppUsageMonitorService : Service() {
              // Add time spent on previous app IF IT WAS WASTEFUL
              if (currentApp.isNotEmpty()) {
                  if (isWastefulApp(currentApp)) {
-                     val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
-                     if (timeSpent < TimeUnit.MINUTES.toMillis(5)) { 
-                         sessionWastedTime.addAndGet(timeSpent)
-                         dailyWastedTime.addAndGet(timeSpent)
-                         Log.d(TAG, "Added $timeSpent ms to wasteful time (previous app: $currentApp)")
+                     val timeSpent = now - lastAppChangeTime
+                     if (timeSpent < 5.minutes) { 
+                         sessionWastedTime += timeSpent
+                         dailyWastedTime += timeSpent
+                         Log.d(TAG, "Added $timeSpent to wasteful time (previous app: $currentApp)")
                      } else {
-                          Log.w(TAG, "Ignoring large time difference ($timeSpent ms) for previous app: $currentApp")
+                          Log.w(TAG, "Ignoring large time difference ($timeSpent) for previous app: $currentApp")
                      }
                  }
              }
 
             // Update currentApp; if detection is empty, clear current app
             currentApp = detectedApp
-             lastAppChangeTime.set(System.currentTimeMillis())
+             lastAppChangeTime = now
 
              // Reset session timer ONLY when a *new* wasteful app starts
              if (isWastefulApp(detectedApp)) {
-                  sessionWastedTime.set(0)
-                  sessionStartTime.set(System.currentTimeMillis())
+                  sessionWastedTime = Duration.ZERO
+                  sessionStart = now
                   Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
                   EventLogStore.logNewWastefulAppDetected(detectedApp)
              }
          } else if (isCurrentlyWasteful) {
              // Accumulate time for current wasteful app
-             val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
-              if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
-                 sessionWastedTime.addAndGet(timeSpent)
-                 dailyWastedTime.addAndGet(timeSpent)
-                 Log.v(TAG, "Accumulated $timeSpent ms for current wasteful app: $currentApp")
+             val timeSpent = now - lastAppChangeTime
+              if (timeSpent < 5.minutes) {
+                 sessionWastedTime += timeSpent
+                 dailyWastedTime += timeSpent
+                 Log.v(TAG, "Accumulated $timeSpent for current wasteful app: $currentApp")
               }
-             lastAppChangeTime.set(System.currentTimeMillis())
+             lastAppChangeTime = now
          }
          
         wasPreviouslyWasteful = isCurrentlyWasteful
@@ -699,8 +703,8 @@ class AppUsageMonitorService : Service() {
         conversationHistoryManager.addApiOnlyUserMessage(
             messageText = prompt,
             currentAppName = appName,
-            sessionTimeMs = sessionWastedTime.get(),
-            dailyTimeMs = dailyWastedTime.get()
+            sessionTime = sessionWastedTime,
+            dailyTime = dailyWastedTime
         )
 
         // Build contents for a one-off generation using the updated API history
@@ -716,9 +720,9 @@ class AppUsageMonitorService : Service() {
                     // Process any remember() function calls
                     for (tool in parsedResponse.tools) {
                         if (tool is ToolCommand.Remember) {
-                            val durationMinutes = tool.durationMinutes
-                            if (durationMinutes != null) {
-                                AIMemoryManager.addTemporaryMemory(context, tool.content, durationMinutes)
+                            val duration = tool.duration
+                            if (duration != null) {
+                                AIMemoryManager.addTemporaryMemory(context, tool.content, duration, timeProvider)
                             } else {
                                 AIMemoryManager.addPermanentMemory(context, tool.content)
                             }
@@ -829,21 +833,21 @@ class AppUsageMonitorService : Service() {
         val bucketRemaining = tokenBucket.getCurrentRemaining()
         val maxOverfill = SettingsManager.getMaxOverfill(this)
         val bucketText = if (bucketRemaining < maxThreshold) {
-            "Bucket: ${bucketRemaining} min remaining"
+            "Bucket: $bucketRemaining min remaining"
         } else {
             val overfillAmount = bucketRemaining - maxThreshold
-            "Bucket: full${if (overfillAmount > 0) " (+${overfillAmount} min overfill)" else ""}"
+            "Bucket: full${if (overfillAmount.isPositive()) " (+${overfillAmount} min overfill)" else ""}"
         }
         
         // Calculate current app time when on a wasteful app
         val currentAppTime = if (currentApp.isNotEmpty() && isWastefulApp(currentApp)) {
-            val timeSpent = System.currentTimeMillis() - lastAppChangeTime.get()
-            if (timeSpent < TimeUnit.MINUTES.toMillis(5)) {
+            val timeSpent = timeProvider.now() - lastAppChangeTime
+            if (timeSpent < 5.minutes) {
                 "Current App Time: ${formatDuration(timeSpent)}"
             } else null
         } else null
         
-        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime.get()}ms, Daily: ${dailyWastedTime.get()}ms, Bucket: ${bucketRemaining}ms")
+        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime}, Daily: ${dailyWastedTime}, Bucket: ${bucketRemaining}")
         
         // Build notification text with current app time when bucket is being consumed
         val notificationText = buildString {

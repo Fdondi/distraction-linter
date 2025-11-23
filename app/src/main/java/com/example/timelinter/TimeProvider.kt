@@ -1,14 +1,16 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlin.time.ExperimentalTime
 
+@ExperimentalTime
 interface TimeProvider {
-    fun now(): Instant
+    fun now(): kotlin.time.Instant
 }
 
 object SystemTimeProvider : TimeProvider {
-    override fun now(): Instant = Clock.System.now()
+    override fun now(): kotlin.time.Instant = kotlin.time.Clock.System.now()
 }
 
 

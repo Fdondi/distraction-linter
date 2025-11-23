@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
 
     private fun hasUsageStatsPermission(): Boolean {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.unsafeCheckOpNoThrow(
+        val mode = appOps.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS,
             android.os.Process.myUid(),
             packageName
@@ -360,17 +360,9 @@ class MainActivity : ComponentActivity() {
         // Fallback to checking running services
         val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         // Check for running services (this works for API 26+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return manager.getRunningServices(Integer.MAX_VALUE)?.any { serviceInfo ->
-                serviceInfo.service.className == AppUsageMonitorService::class.java.name
-            } ?: false
-        } else {
-            // For older versions, check running processes more carefully
-            return manager.runningAppProcesses?.any { processInfo ->
-                processInfo.processName == packageName &&
-                processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
-            } ?: false
-        }
+        return manager.getRunningServices(Integer.MAX_VALUE)?.any { serviceInfo ->
+            serviceInfo.service.className == AppUsageMonitorService::class.java.name
+        } ?: false
     }
 }
 

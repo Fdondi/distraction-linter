@@ -3,6 +3,7 @@ package com.example.timelinter
 import android.util.Log
 import com.google.ai.client.generativeai.type.GenerateContentResponse
 import com.google.ai.client.generativeai.type.TextPart
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Parses Gemini function calls (if present) from a GenerateContentResponse.
@@ -18,7 +19,9 @@ object GeminiFunctionCallParser {
         val tools = mutableListOf<ToolCommand>()
         val textParts = mutableListOf<String>()
 
-        val candidates = try { response.candidates ?: emptyList() } catch (e: Exception) { emptyList() }
+        val candidates = try {
+            response.candidates
+        } catch (e: Exception) { emptyList() }
         candidates.forEach { candidate ->
             val content = try { candidate.content } catch (e: Exception) { null }
             val parts = try { content?.parts ?: emptyList() } catch (e: Exception) { emptyList() }
@@ -66,13 +69,13 @@ object GeminiFunctionCallParser {
                     val minutes = (argsMap["minutes"] as? Number)?.toInt()
                         ?: (argsMap["minutes"] as? String)?.toIntOrNull()
                     val app = argsMap["app"]?.toString()?.takeIf { it.isNotBlank() }
-                    minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it, app) }
+                    minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it.minutes, app) }
                 }
                 "remember" -> {
                     val content = argsMap["content"]?.toString()?.takeIf { it.isNotBlank() }
                     val minutes = (argsMap["minutes"] as? Number)?.toInt()
                         ?: (argsMap["minutes"] as? String)?.toIntOrNull()
-                    content?.let { ToolCommand.Remember(it, minutes) }
+                    content?.let { ToolCommand.Remember(it, minutes?.minutes) }
                 }
                 else -> null
             }
