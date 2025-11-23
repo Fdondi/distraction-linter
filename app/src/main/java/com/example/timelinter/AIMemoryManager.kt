@@ -3,7 +3,6 @@ package com.example.timelinter
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import kotlinx.datetime.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
@@ -13,11 +12,11 @@ import kotlin.time.Instant
 @Serializable
 data class MemoryItem(
     val content: String,
-    val createdAt: kotlin.time.Instant,
-    val expiresAt: kotlin.time.Instant? = null // null means permanent memory
+    val createdAt: Instant,
+    val expiresAt: Instant? = null // null means permanent memory
     
 ) {
-    fun isExpiredAt(now: kotlin.time.Instant): Boolean {
+    fun isExpiredAt(now: Instant): Boolean {
         return expiresAt != null && now >= expiresAt
     }
 }

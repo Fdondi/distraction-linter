@@ -2,7 +2,6 @@ package com.example.timelinter
 
 import android.content.Context
 import android.util.Log
-import kotlin.time.Duration
 import kotlin.time.Instant
 
 sealed class InteractionState {
