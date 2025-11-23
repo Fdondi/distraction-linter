@@ -93,9 +93,9 @@ object GeminiFunctionCallParser {
         return trimmed.split(",").mapNotNull { pair ->
             val idx = pair.indexOf('=')
             if (idx <= 0) return@mapNotNull null
-            val key = pair.substring(0, idx).trim()
+            val key = pair.take(idx).trim()
             val raw = pair.substring(idx + 1).trim()
-            val value: Any? = raw.toIntOrNull() ?: raw.toLongOrNull() ?: raw.toDoubleOrNull() ?: raw.removeSurrounding("\"", "\"")
+            val value: Any = raw.toIntOrNull() ?: raw.toLongOrNull() ?: raw.toDoubleOrNull() ?: raw.removeSurrounding("\"", "\"")
             key to value
         }.toMap()
     }

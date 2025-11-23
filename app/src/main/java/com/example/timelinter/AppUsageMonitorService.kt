@@ -1,41 +1,42 @@
 package com.example.timelinter
 
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.app.usage.UsageStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.BroadcastReceiver
+import android.content.Intent.ACTION_MAIN
+import android.content.Intent.CATEGORY_HOME
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
-import android.os.PowerManager
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.UserManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import androidx.core.app.RemoteInput
-import kotlinx.coroutines.*
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.minutes
-import com.example.timelinter.TimeProvider
-import com.example.timelinter.SystemTimeProvider
-import kotlin.time.DurationUnit
-import kotlin.time.toDuration
+import com.google.ai.client.generativeai.type.GenerateContentResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-import java.util.*
-import android.app.usage.UsageStats
-import android.app.PendingIntent
-import androidx.core.app.Person
-import com.example.timelinter.BrowserUrlAccessibilityService
-import android.app.KeyguardManager
-import com.google.ai.client.generativeai.type.GenerateContentResponse
-import android.content.Intent.ACTION_MAIN
-import android.content.Intent.CATEGORY_HOME
-import android.content.pm.PackageManager
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.DurationUnit
 import kotlin.time.Instant
+import kotlin.time.toDuration
 
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
@@ -242,7 +243,7 @@ class AppUsageMonitorService : Service() {
                                 }
                             }
                         } else {
-                            Log.v(TAG, "Received ${action} but device still locked or screen off; not starting")
+                            Log.v(TAG, "Received $action but device still locked or screen off; not starting")
                         }
                     }
                 }
@@ -906,10 +907,10 @@ class AppUsageMonitorService : Service() {
     // ---------- Device/launcher helpers ----------
     private fun isDeviceLockedOrScreenOff(): Boolean {
         return try {
-            val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+            val power = getSystemService(POWER_SERVICE) as PowerManager
             val locked = keyguard.isKeyguardLocked
-            val interactive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) power.isInteractive else true
+            val interactive = power.isInteractive
             locked || !interactive
         } catch (e: Exception) {
             Log.e(TAG, "Error checking device lock/screen state", e)
@@ -968,15 +969,6 @@ class AppUsageMonitorService : Service() {
         return res
     }
 
-    private fun getStartOfDay(): Long {
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        return calendar.timeInMillis
-    }
-
     private fun readRawResource(resourceId: Int): String {
         return try {
             resources.openRawResource(resourceId).bufferedReader().use { it.readText() }
@@ -1011,7 +1003,7 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
+    override fun onBind(intent: Intent?): IBinder {
         boundClients++
         Log.d(TAG, "Service bound, total clients: $boundClients")
         return binder
