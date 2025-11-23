@@ -60,7 +60,12 @@ object SettingsManager {
     }
 
     fun setResponseTimer(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(RESPONSE_TIMER_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                RESPONSE_TIMER_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     /* =========================  Threshold Settings  ========================= */
@@ -70,7 +75,12 @@ object SettingsManager {
     }
 
     fun setMaxThreshold(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(MAX_THRESHOLD_MINUTES_KEY, duration.toInt(DurationUnit.MINUTES)).apply()
+        getPreferences(context).edit {
+            putInt(
+                MAX_THRESHOLD_MINUTES_KEY,
+                duration.toInt(DurationUnit.MINUTES)
+            )
+        }
     }
 
     fun getReplenishInterval(context: Context): Duration {
@@ -78,7 +88,12 @@ object SettingsManager {
     }
 
     fun setReplenishInterval(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(REPLENISH_INTERVAL_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                REPLENISH_INTERVAL_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     fun getReplenishAmount(context: Context): Duration {
@@ -86,7 +101,12 @@ object SettingsManager {
     }
 
     fun setReplenishAmount(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(REPLENISH_AMOUNT_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                REPLENISH_AMOUNT_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     /* =========================  Threshold Remaining (persistence)  ========================= */
@@ -95,7 +115,12 @@ object SettingsManager {
     }
 
     fun setThresholdRemaining(context: Context, value: Duration) {
-        getPreferences(context).edit().putLong(THRESHOLD_REMAINING_MS_KEY, value.inWholeMilliseconds).apply()
+        getPreferences(context).edit {
+            putLong(
+                THRESHOLD_REMAINING_MS_KEY,
+                value.inWholeMilliseconds
+            )
+        }
     }
 
     /* =========================  Good Apps Settings  ========================= */
@@ -105,7 +130,12 @@ object SettingsManager {
     }
 
     fun setMaxOverfill(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(MAX_OVERFILL_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                MAX_OVERFILL_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     fun getOverfillDecayPerHour(context: Context): Duration {
@@ -113,7 +143,12 @@ object SettingsManager {
     }
 
     fun setOverfillDecayPerHour(context: Context, duration: Duration) {
-        getPreferences(context).edit().putInt(OVERFILL_DECAY_PER_HOUR_MINUTES_KEY, duration.inWholeMinutes.toInt()).apply()
+        getPreferences(context).edit {
+            putInt(
+                OVERFILL_DECAY_PER_HOUR_MINUTES_KEY,
+                duration.inWholeMinutes.toInt()
+            )
+        }
     }
 
     fun getGoodAppFillRateMultiplier(context: Context): Float {
@@ -121,14 +156,6 @@ object SettingsManager {
     }
 
     fun setGoodAppFillRateMultiplier(context: Context, multiplier: Float) {
-        getPreferences(context).edit().putFloat(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, multiplier).apply()
-    }
-
-    fun getNeutralAppFillRateMultiplier(context: Context): Float {
-        return getPreferences(context).getFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, 1.0f)
-    }
-
-    fun setNeutralAppFillRateMultiplier(context: Context, multiplier: Float) {
-        getPreferences(context).edit().putFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, multiplier).apply()
+        getPreferences(context).edit { putFloat(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, multiplier) }
     }
 }

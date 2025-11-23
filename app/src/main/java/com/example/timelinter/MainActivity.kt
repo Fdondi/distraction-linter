@@ -310,7 +310,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun hasUsageStatsPermission(): Boolean {
-        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val appOps = getSystemService(APP_OPS_SERVICE) as AppOpsManager
         val mode = appOps.checkOpNoThrow(
             AppOpsManager.OPSTR_GET_USAGE_STATS,
             android.os.Process.myUid(),
@@ -356,7 +356,7 @@ class MainActivity : ComponentActivity() {
         startForegroundService(intent)
 
         // Also bind to the service for better lifecycle management
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        bindService(intent, serviceConnection, BIND_AUTO_CREATE)
     }
 
     private fun stopMonitoringService() {
@@ -373,18 +373,16 @@ class MainActivity : ComponentActivity() {
     }
 
     // Helper to check if our specific service is running
+    // Modern approach: uses service binding and static instance tracking
     private fun isServiceRunning(): Boolean {
         // First check if we have a bound service that's ready
         if (isServiceBound && boundService?.isServiceReady() == true) {
             return true
         }
 
-        // Fallback to checking running services
-        val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        // Check for running services (this works for API 26+)
-        return manager.getRunningServices(Integer.MAX_VALUE)?.any { serviceInfo ->
-            serviceInfo.service.className == AppUsageMonitorService::class.java.name
-        } ?: false
+        // Modern fallback: check the static service instance
+        // This is the recommended replacement for the deprecated getRunningServices()
+        return AppUsageMonitorService.isServiceRunning()
     }
 }
 

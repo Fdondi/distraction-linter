@@ -68,6 +68,24 @@ class AppUsageMonitorService : Service() {
         const val EXTRA_APP_NAME = "com.example.timelinter.EXTRA_APP_NAME"
         const val EXTRA_SESSION_TIME_MS = "com.example.timelinter.EXTRA_SESSION_TIME_MS"
         const val EXTRA_DAILY_TIME_MS = "com.example.timelinter.EXTRA_DAILY_TIME_MS"
+        
+        // Modern way to track if service is running (replaces getRunningServices)
+        @Volatile
+        private var serviceInstance: AppUsageMonitorService? = null
+        
+        /**
+         * Check if the service is currently running.
+         * This is the modern replacement for getRunningServices().
+         */
+        fun isServiceRunning(): Boolean {
+            return serviceInstance != null
+        }
+        
+        /**
+         * Get the current service instance if running, null otherwise.
+         * Internal use only.
+         */
+        internal fun getServiceInstance(): AppUsageMonitorService? = serviceInstance
     }
 
     // Timings
@@ -104,6 +122,8 @@ class AppUsageMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate called")
+        // Register this instance as the running service
+        serviceInstance = this
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
         
@@ -981,6 +1001,8 @@ class AppUsageMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called")
+        // Clear the service instance reference
+        serviceInstance = null
         // Persist bucket value so it survives service restarts
         tokenBucket.persistCurrentState()
         serviceScope.cancel()

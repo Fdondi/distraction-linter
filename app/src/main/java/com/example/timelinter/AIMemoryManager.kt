@@ -86,7 +86,7 @@ object AIMemoryManager {
     }
 
     data class TemporaryGroupByDate(
-        val expirationDateKey: kotlin.time.Instant,
+        val expirationDateKey: Instant,
         val items: List<String>
     )
 

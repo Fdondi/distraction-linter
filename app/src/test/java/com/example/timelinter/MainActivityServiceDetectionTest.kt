@@ -1,29 +1,21 @@
 package com.example.timelinter
 
-import android.app.ActivityManager
-import android.app.Service
 import android.content.Context
-import android.os.Build
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
 import org.mockito.Mockito.*
 import org.mockito.MockitoAnnotations
-import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.annotation.Config
 
 /**
  * Tests for MainActivity service detection fixes:
  * 1. Properly detects when AppUsageMonitorService is running
  * 2. Uses service binding for accurate state detection
- * 3. Handles different Android API levels correctly
+ * 3. Uses static instance tracking (modern replacement for getRunningServices)
  */
 class MainActivityServiceDetectionTest {
-
-    @Mock
-    private lateinit var mockActivityManager: ActivityManager
 
     @Mock
     private lateinit var mockService: AppUsageMonitorService
@@ -56,27 +48,29 @@ class MainActivityServiceDetectionTest {
     }
 
     @Test
-    fun serviceDetection_fallbacksToProcessCheck_whenNotBound() {
-        // Test fallback to process-based detection when service not bound
+    fun serviceDetection_fallbacksToStaticInstanceCheck_whenNotBound() {
+        // Test fallback to static instance check when service not bound
 
         val testActivity = TestMainActivity()
         testActivity.isServiceBound = false
         testActivity.boundService = null
 
-        // Mock ActivityManager for API 26+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val runningServices = listOf(
-                ActivityManager.RunningServiceInfo().apply {
-                    service = android.content.ComponentName(context, AppUsageMonitorService::class.java)
-                }
-            )
-            `when`(mockActivityManager.getRunningServices(anyInt())).thenReturn(runningServices)
+        // Set the static service instance to simulate running service
+        val serviceInstance = AppUsageMonitorService.getServiceInstance()
+        try {
+            // Use reflection to set the static instance for testing
+            val companion = AppUsageMonitorService.Companion
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(companion, mockService)
 
-            // Replace the activity manager in the test
-            testActivity.mockActivityManager = mockActivityManager
-
-            assertTrue("Should detect service as running via process check",
+            assertTrue("Should detect service as running via static instance check",
                        testActivity.testIsServiceRunning())
+        } finally {
+            // Clean up: clear the static instance
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(null, null)
         }
     }
 
@@ -88,44 +82,43 @@ class MainActivityServiceDetectionTest {
         testActivity.isServiceBound = false
         testActivity.boundService = null
 
-        // Mock no running services
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            `when`(mockActivityManager.getRunningServices(anyInt())).thenReturn(emptyList())
-            testActivity.mockActivityManager = mockActivityManager
+        // Ensure static instance is null (service not running)
+        try {
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(null, null)
 
-            assertFalse("Should detect service as not running when no services found",
+            assertFalse("Should detect service as not running when static instance is null",
                         testActivity.testIsServiceRunning())
+        } finally {
+            // Clean up
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(null, null)
         }
     }
 
     @Test
     fun serviceDetection_handlesDifferentAndroidVersions() {
         // Test that detection works across different Android API levels
+        // The new approach using static instance works on all API levels
 
         val testActivity = TestMainActivity()
 
-        // For API 26+ (Oreo and above)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val runningServices = listOf(
-                ActivityManager.RunningServiceInfo().apply {
-                    service = android.content.ComponentName(context, AppUsageMonitorService::class.java)
-                }
-            )
-            `when`(mockActivityManager.getRunningServices(anyInt())).thenReturn(runningServices)
-            testActivity.mockActivityManager = mockActivityManager
+        // Set static instance to simulate running service
+        try {
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(null, mockService)
 
-            assertTrue("Should work on API 26+ with running services check",
+            assertTrue("Should work on all API levels with static instance check",
                        testActivity.testIsServiceRunning())
+        } finally {
+            // Clean up
+            val field = AppUsageMonitorService::class.java.getDeclaredField("serviceInstance")
+            field.isAccessible = true
+            field.set(null, null)
         }
-
-        // For older versions (fallback to process check)
-        val mockProcessInfo = ActivityManager.RunningAppProcessInfo().apply {
-            processName = context.packageName
-            importance = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
-        }
-
-        // This is harder to test in unit tests, but the logic should handle it
-        // In practice, this would be tested with integration tests
     }
 
     @Test
@@ -160,28 +153,18 @@ class MainActivityServiceDetectionTest {
      * Test wrapper class to access private methods of MainActivity
      */
     private class TestMainActivity : MainActivity() {
-        var mockActivityManager: ActivityManager? = null
         var boundService: AppUsageMonitorService? = null
         var isServiceBound = false
 
         // Expose the private isServiceRunning method for testing
         fun testIsServiceRunning(): Boolean {
-            // Override the activity manager if mocked
-            mockActivityManager?.let { activityManager ->
-                // Use reflection or create a test-specific version
-                // For this test, we'll simulate the logic
-                if (isServiceBound && boundService?.isServiceReady() == true) {
-                    return true
-                }
-
-                // Fallback logic for testing
-                return mockActivityManager?.getRunningServices(Int.MAX_VALUE)?.any { serviceInfo ->
-                    serviceInfo.service.className == AppUsageMonitorService::class.java.name
-                } ?: false
+            // Simulate the actual logic from MainActivity
+            if (isServiceBound && boundService?.isServiceReady() == true) {
+                return true
             }
 
-            // Default behavior
-            return false
+            // Modern fallback: check the static service instance
+            return AppUsageMonitorService.isServiceRunning()
         }
     }
 }
