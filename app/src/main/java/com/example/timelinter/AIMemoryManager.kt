@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalTime::class)
-
 package com.example.timelinter
 
 import android.content.Context
@@ -9,7 +7,6 @@ import kotlinx.datetime.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration
-import kotlin.time.ExperimentalTime
 import androidx.core.content.edit
 import kotlin.time.Instant
 

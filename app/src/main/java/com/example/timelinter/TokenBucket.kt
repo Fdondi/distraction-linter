@@ -1,10 +1,7 @@
-@file:OptIn(ExperimentalTime::class)
-
 package com.example.timelinter
 
 import android.content.Context
 import kotlin.time.Duration
-import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 data class TokenBucketConfig(

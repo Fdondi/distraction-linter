@@ -1,10 +1,5 @@
-@file:OptIn(ExperimentalTime::class)
-
 package com.example.timelinter
 
-import kotlin.time.ExperimentalTime
-
-@ExperimentalTime
 interface TimeProvider {
     fun now(): kotlin.time.Instant
 }

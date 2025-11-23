@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalTime::class)
-
 package com.example.timelinter
 
 import android.app.NotificationChannel
@@ -37,7 +35,6 @@ import com.google.ai.client.generativeai.type.GenerateContentResponse
 import android.content.Intent.ACTION_MAIN
 import android.content.Intent.CATEGORY_HOME
 import android.content.pm.PackageManager
-import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 class AppUsageMonitorService : Service() {

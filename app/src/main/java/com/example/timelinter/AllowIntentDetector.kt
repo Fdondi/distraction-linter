@@ -1,9 +1,6 @@
 package com.example.timelinter
 
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
-import kotlin.time.DurationUnit
-import kotlin.time.toDuration
 
 
 object AllowIntentDetector {

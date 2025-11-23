@@ -27,9 +27,7 @@ import kotlinx.datetime.format.byUnicodePattern
 import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 import java.time.LocalDate
-import kotlin.time.ExperimentalTime
 
-@OptIn(ExperimentalTime::class)
 @Composable
 fun AILogScreen(
     onNavigateBack: () -> Unit
