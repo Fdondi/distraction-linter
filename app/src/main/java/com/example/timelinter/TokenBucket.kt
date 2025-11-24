@@ -80,6 +80,7 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
     // The bucket owns its own state - store remaining time as Duration
     private var currentRemaining: Duration = Duration.ZERO
     private var lastUpdate: Instant = timeProvider.now()
+    private var lastAppState: AppState? = null
 
     // Initialize with current settings
     init {
@@ -91,19 +92,35 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
     fun getCurrentRemaining(): Duration = currentRemaining
 
     fun update(appState: AppState): Duration {
-        val currentRemaining = getCurrentRemaining()
-
-        if (currentRemaining <= Duration.ZERO) {
-            throw IllegalArgumentException("Bucket is already empty")
-        }
-
         val config = getCurrentConfig()
+        val now = timeProvider.now()
 
-        // Use the app state's update method
-        val delta = timeProvider.now() - lastUpdate
-        lastUpdate = timeProvider.now()
+        // Calculate delta based on current state transition
+        // If state changed, reset the time tracking to avoid counting time from previous state
+        val delta = if (lastAppState != appState) {
+            // State changed - only count time from now, not from last update
+            // This prevents deducting time that was spent in a different state
+            Duration.ZERO
+        } else {
+            // Same state - count time since last update
+            now - lastUpdate
+        }
+        
+        // Update tracking
+        lastAppState = appState
+        lastUpdate = now
+        
+        // The appState's updateRemainingTime will handle the logic:
+        // - WASTEFUL: deducts delta
+        // - GOOD: adds time
+        // - NEUTRAL: only decays overfill if present
         val newRemaining = appState.updateRemainingTime(currentRemaining, delta, config)
-        return clampWithOverfill(newRemaining, config)
+        val clampedRemaining = clampWithOverfill(newRemaining, config)
+        
+        // Actually update the stored state
+        currentRemaining = clampedRemaining
+        
+        return clampedRemaining
     }
 
     private fun getCurrentConfig(): TokenBucketConfig {
@@ -137,6 +154,5 @@ object TriggerDecider {
         return isWasteful && !isAllowed && remainingTime <= Duration.ZERO
     }
 }
-
 
 

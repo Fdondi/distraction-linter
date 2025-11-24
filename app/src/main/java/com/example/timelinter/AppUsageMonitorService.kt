@@ -99,6 +99,7 @@ class AppUsageMonitorService : Service() {
     private var dailyWastedTime: Duration = Duration.ZERO
     private var currentApp: String = ""
     private var lastAppChangeTime: Instant = timeProvider.now()
+    private var currentAppSessionStart: Instant = timeProvider.now() // Track when current app session started
 
     // Unified token bucket - owns its own state
     private lateinit var tokenBucket: TokenBucket
@@ -536,8 +537,7 @@ class AppUsageMonitorService : Service() {
     private fun getCurrentAppUsage(): AppInfo? {
         val usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
-        // Look back further to get more reliable events
-        val beginTime = endTime - 1000 * 60 * 2 // 2 minutes
+        val beginTime = endTime - 1000 * 60 * 1 // 1 minute
 
         try {
             // Check if user is unlocked (required for Android R+)
@@ -553,38 +553,69 @@ class AppUsageMonitorService : Service() {
                 return null
             }
 
-            // Use queryEvents instead of queryUsageStats for real-time detection
-            val usageEvents = usageStatsManager.queryEvents(beginTime, endTime)
-            if (usageEvents == null) {
-                Log.w(TAG, "queryEvents returned null")
-                return null
-            }
-
+            // Try queryEvents first (more real-time, better for Android 15)
             var currentForegroundApp: String? = null
-            val event = android.app.usage.UsageEvents.Event()
             
-            // Process events chronologically to find the most recent foreground app
-            while (usageEvents.hasNextEvent()) {
-                usageEvents.getNextEvent(event)
-                
-                // Filter out our own app and empty package names
-                if (event.packageName == applicationContext.packageName || event.packageName.isEmpty()) {
-                    continue
-                }
-                
-                // Look for ACTIVITY_RESUMED events (app comes to foreground)
-                if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
-                    currentForegroundApp = event.packageName
-                } else if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED) {
-                    // If the same app that was in foreground gets paused, it's no longer foreground
-                    if (event.packageName == currentForegroundApp) {
-                        currentForegroundApp = null
+            try {
+                val usageEvents = usageStatsManager.queryEvents(beginTime, endTime)
+                if (usageEvents != null) {
+                    val event = android.app.usage.UsageEvents.Event()
+                    
+                    // Process events chronologically to find the most recent foreground app
+                    while (usageEvents.hasNextEvent()) {
+                        usageEvents.getNextEvent(event)
+                        
+                        // Filter out our own app and empty package names
+                        if (event.packageName == applicationContext.packageName || event.packageName.isEmpty()) {
+                            continue
+                        }
+                        
+                        // Look for ACTIVITY_RESUMED events (app comes to foreground)
+                        if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
+                            currentForegroundApp = event.packageName
+                            Log.v(TAG, "Found ACTIVITY_RESUMED event for: ${event.packageName}")
+                        } else if (event.eventType == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED) {
+                            // If the same app that was in foreground gets paused, it's no longer foreground
+                            if (event.packageName == currentForegroundApp) {
+                                Log.v(TAG, "Found ACTIVITY_PAUSED event for current foreground app: ${event.packageName}")
+                                currentForegroundApp = null
+                            }
+                        }
                     }
+                } else {
+                    Log.w(TAG, "queryEvents returned null")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error with queryEvents, trying queryUsageStats fallback", e)
+            }
+            
+            // Fallback: Use queryUsageStats if queryEvents didn't work (better compatibility)
+            if (currentForegroundApp == null) {
+                try {
+                    val usageStats = usageStatsManager.queryUsageStats(
+                        UsageStatsManager.INTERVAL_BEST,
+                        beginTime,
+                        endTime
+                    )
+                    
+                    if (usageStats != null && usageStats.isNotEmpty()) {
+                        // Sort by last time used and get the most recent
+                        val sortedStats = usageStats.sortedByDescending { it.lastTimeUsed }
+                        val mostRecent = sortedStats.firstOrNull()
+                        if (mostRecent != null && mostRecent.packageName != applicationContext.packageName) {
+                            currentForegroundApp = mostRecent.packageName
+                            Log.v(TAG, "Fallback: Found app via queryUsageStats: ${mostRecent.packageName}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error with queryUsageStats fallback", e)
                 }
             }
             
             // If we found a foreground app, return its info unless it's the launcher/home
             if (currentForegroundApp != null) {
+                Log.d(TAG, "Found foreground app package: $currentForegroundApp")
+                
                 if (isHomeLauncher(currentForegroundApp)) {
                     Log.v(TAG, "Foreground is launcher; treating as no app")
                     return null
@@ -604,6 +635,20 @@ class AppUsageMonitorService : Service() {
                 val readableName = getReadableAppName(currentForegroundApp)
                 val isWasteful = isWastefulApp(currentForegroundApp)
                 val isGoodApp = GoodAppManager.isGoodApp(applicationContext, currentForegroundApp)
+                
+                // Debug logging for app detection
+                Log.d(TAG, "Detected app: $currentForegroundApp ($readableName) - Wasteful: $isWasteful, Good: $isGoodApp")
+                val selectedApps = TimeWasterAppManager.getSelectedApps(applicationContext)
+                Log.d(TAG, "Selected wasteful apps: $selectedApps")
+                if (!isWasteful && selectedApps.isNotEmpty()) {
+                    Log.w(TAG, "App $currentForegroundApp is NOT in selected apps list. Checking if it's X/Twitter with different package name...")
+                    // Check for common X/Twitter package name variations
+                    val xVariations = listOf("com.twitter.android", "com.x.android", "com.twitter", "twitter")
+                    val isX = xVariations.any { currentForegroundApp.contains(it, ignoreCase = true) }
+                    if (isX) {
+                        Log.w(TAG, "Detected X/Twitter app but it's not in selected list. Make sure you selected the correct package name: $currentForegroundApp")
+                    }
+                }
                 
                 return AppInfo(
                     packageName = currentForegroundApp,
@@ -636,7 +681,17 @@ class AppUsageMonitorService : Service() {
 
         // ---------------- Token bucket update ----------------
         // The TokenBucket now owns its state and fetches current settings automatically
+        val oldRemaining = tokenBucket.getCurrentRemaining()
+        
+        // Only update bucket if app state changed OR if we're in WASTEFUL state (to continuously drain)
+        // This prevents bucket from updating unnecessarily when in neutral/good states
         val newRemaining = tokenBucket.update(appState = currentAppState)
+        
+        // Log bucket updates for debugging with more detail
+        if (oldRemaining != newRemaining) {
+            val delta = oldRemaining - newRemaining
+            Log.d(TAG, "Bucket updated: ${oldRemaining.inWholeSeconds} s -> ${newRemaining.inWholeSeconds} s (delta: ${delta.inWholeSeconds} s, state: $currentAppState, app: ${appInfo?.readableName ?: "none"})")
+        }
 
         // If bucket just transitioned from empty (<=0) to full (== max), archive & clear
         val becameFull = newRemaining >= SettingsManager.getMaxThreshold(this)
@@ -683,8 +738,14 @@ class AppUsageMonitorService : Service() {
              }
 
             // Update currentApp; if detection is empty, clear current app
+            val appActuallyChanged = currentApp != detectedApp
             currentApp = detectedApp
-             lastAppChangeTime = now
+            lastAppChangeTime = now
+            
+            // Only reset currentAppSessionStart when app actually changes
+            if (appActuallyChanged && detectedApp.isNotEmpty()) {
+                currentAppSessionStart = now
+            }
 
              // Reset session timer ONLY when a *new* wasteful app starts
              if (isWastefulApp(detectedApp)) {
@@ -842,36 +903,62 @@ class AppUsageMonitorService : Service() {
 
     private fun createStatsNotification(): android.app.Notification {
         val monitoringStatus = "Monitoring: Active"
-        val currentAppName = if (currentApp.isNotEmpty()) {
-            if (isWastefulApp(currentApp)) getReadableAppName(currentApp) else "No distracting app active"
+        val (currentAppName, emoji) = if (currentApp.isNotEmpty()) {
+            val appName = getReadableAppName(currentApp)
+            val wasteful = isWastefulApp(currentApp)
+            val goodApp = GoodAppManager.isGoodApp(applicationContext, currentApp)
+            val emoji = when {
+                wasteful -> "💀"
+                goodApp -> "🌸"
+                else -> "?"
+            }
+            Pair("$appName $emoji", emoji)
         } else {
-            "No distracting app active"
+            Pair("(no app detected)", "?")
         }
         val maxThreshold = SettingsManager.getMaxThreshold(this)
         val bucketRemaining = tokenBucket.getCurrentRemaining()
         val maxOverfill = SettingsManager.getMaxOverfill(this)
-        val bucketText = if (bucketRemaining < maxThreshold) {
-            "Bucket: $bucketRemaining min remaining"
-        } else {
-            val overfillAmount = bucketRemaining - maxThreshold
-            "Bucket: full${if (overfillAmount.isPositive()) " (+${overfillAmount} min overfill)" else ""}"
+        
+        // Always show the time, then add "full" if at max and won't increase without good apps
+        val isAtMax = bucketRemaining >= maxThreshold
+        val isWasteful = currentApp.isNotEmpty() && isWastefulApp(currentApp)
+        val isGood = currentApp.isNotEmpty() && GoodAppManager.isGoodApp(applicationContext, currentApp)
+        val willNotIncrease = isAtMax && !isGood // Won't increase if at max and not using good app
+        
+        val bucketText = buildString {
+            append("Bucket: ${formatDuration(bucketRemaining)}")
+            if (willNotIncrease) {
+                append(" (full)")
+            } else if (isAtMax && isGood) {
+                val overfillAmount = bucketRemaining - maxThreshold
+                if (overfillAmount.isPositive()) {
+                    append(" (full +${formatDuration(overfillAmount)} overfill)")
+                } else {
+                    append(" (full)")
+                }
+            }
         }
         
         // Calculate current app time when on a wasteful app
-        val currentAppTime = if (currentApp.isNotEmpty() && isWastefulApp(currentApp)) {
-            val timeSpent = timeProvider.now() - lastAppChangeTime
-            if (timeSpent < 5.minutes) {
-                "Current App Time: ${formatDuration(timeSpent)}"
-            } else null
+        // Use currentAppSessionStart to show total time on current app (not reset by accumulation cycles)
+        val currentAppTime = if (isWasteful && currentApp.isNotEmpty()) {
+            val timeSpent = timeProvider.now() - currentAppSessionStart
+            // Always show current app time, no matter how long
+            "Current App Time: ${formatDuration(timeSpent)}"
         } else null
         
-        Log.d(TAG, "Creating stats notification. App: $currentAppName, Session: ${sessionWastedTime}, Daily: ${dailyWastedTime}, Bucket: ${bucketRemaining}")
+        Log.d(TAG, "Creating stats notification. App: $currentAppName (package: $currentApp), Session: ${sessionWastedTime}, Daily: ${dailyWastedTime}, Bucket: ${bucketRemaining}")
         
         // Build notification text with current app time when bucket is being consumed
         val notificationText = buildString {
             appendLine(monitoringStatus)
             appendLine("Current: $currentAppName")
-            if (currentAppTime != null && bucketRemaining < maxThreshold) {
+            // Show package name for debugging
+            if (currentApp.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                appendLine("Pkg: ${currentApp.substringAfterLast('.')}")
+            }
+            if (currentAppTime != null) {
                 appendLine(currentAppTime)
             }
             appendLine("Session Time: ${formatDuration(sessionWastedTime)}")

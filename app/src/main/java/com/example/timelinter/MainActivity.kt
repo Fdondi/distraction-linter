@@ -127,14 +127,41 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
+                val context = LocalContext.current
+                
+                // Check if this is first boot (no apps selected and tutorial not shown)
+                val isFirstBoot = remember {
+                    val selectedApps = TimeWasterAppManager.getSelectedApps(context)
+                    val tutorialShown = ApiKeyManager.hasFirstBootTutorialBeenShown(context)
+                    selectedApps.isEmpty() && !tutorialShown
+                }
+                
+                var showTutorialScreen by remember { mutableStateOf(isFirstBoot) }
                 var showAppsScreen by remember { mutableStateOf(false) }
                 var showGoodAppsScreen by remember { mutableStateOf(false) }
                 var showTimerScreen by remember { mutableStateOf(false) }
                 var showLogScreen by remember { mutableStateOf(false) }
                 var showAIConfigScreen by remember { mutableStateOf(false) }
 
-                if (showAppsScreen) {
-                    AppSelectionScreen(onNavigateBack = { showAppsScreen = false })
+                if (showTutorialScreen) {
+                    FirstBootTutorialScreen(
+                        onNavigateToAppSelection = {
+                            showTutorialScreen = false
+                            showAppsScreen = true
+                        },
+                        onSkip = {
+                            ApiKeyManager.setFirstBootTutorialShown(context)
+                            showTutorialScreen = false
+                        }
+                    )
+                } else if (showAppsScreen) {
+                    AppSelectionScreen(
+                        onNavigateBack = { 
+                            showAppsScreen = false
+                            // After selecting apps, mark tutorial as shown
+                            ApiKeyManager.setFirstBootTutorialShown(context)
+                        }
+                    )
                 } else if (showGoodAppsScreen) {
                     GoodAppSelectionScreen(onNavigateBack = { showGoodAppsScreen = false })
                 } else if (showTimerScreen) {

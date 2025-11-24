@@ -109,4 +109,17 @@ object ApiKeyManager {
         getEncryptedPreferences(context)?.edit()?.remove(COACH_NAME_PREF)?.apply()
         Log.i(TAG, "Coach name cleared.")
     }
+
+    private const val FIRST_BOOT_TUTORIAL_SHOWN_PREF = "first_boot_tutorial_shown"
+
+    fun setFirstBootTutorialShown(context: Context) {
+        getEncryptedPreferences(context)?.edit()?.putBoolean(FIRST_BOOT_TUTORIAL_SHOWN_PREF, true)?.apply()
+        Log.i(TAG, "First boot tutorial shown flag set.")
+    }
+
+    fun hasFirstBootTutorialBeenShown(context: Context): Boolean {
+        val shown = getEncryptedPreferences(context)?.getBoolean(FIRST_BOOT_TUTORIAL_SHOWN_PREF, false) ?: false
+        Log.d(TAG, "First boot tutorial shown flag checked: $shown")
+        return shown
+    }
 } 

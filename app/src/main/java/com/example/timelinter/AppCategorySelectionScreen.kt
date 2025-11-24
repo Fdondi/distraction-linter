@@ -41,18 +41,21 @@ fun AppCategorySelectionScreen(
     var allApps by remember { mutableStateOf(listOf<AppInfo>()) }
     var showPermissionDialog by remember { mutableStateOf(false) }
 
+    // On Android 11+, package visibility is controlled by <queries> in manifest, not runtime permissions
     fun canQueryPackages(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val mainIntent = Intent(Intent.ACTION_MAIN, null)
-                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-                val list = context.packageManager.queryIntentActivities(mainIntent, 0)
-                list.size > 100
-            } catch (e: SecurityException) {
-                false
-            }
-        } else {
-            true
+        return try {
+            val mainIntent = Intent(Intent.ACTION_MAIN, null)
+            mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
+            val list = context.packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
+            // If we can query at all, we're good - the <queries> declaration in manifest handles visibility
+            true // Just try to query, don't block on count
+        } catch (e: SecurityException) {
+            Log.e("AppCategorySelection", "Security exception checking package visibility", e)
+            false
+        } catch (e: Exception) {
+            Log.e("AppCategorySelection", "Error checking package visibility", e)
+            // On error, assume we can't query (but this shouldn't happen with proper <queries> declaration)
+            false
         }
     }
 
@@ -116,8 +119,15 @@ fun AppCategorySelectionScreen(
     if (showPermissionDialog) {
         AlertDialog(
             onDismissRequest = { showPermissionDialog = false },
-            title = { Text("Permission Required") },
-            text = { Text("To see all installed apps, you need to grant the QUERY_ALL_PACKAGES permission in Settings.") },
+            title = { Text("Cannot Access Apps") },
+            text = { 
+                Text(
+                    "Time Linter cannot see your installed apps. " +
+                    "This may be due to Android's package visibility restrictions. " +
+                    "The app should work with the default settings, but if you're having issues, " +
+                    "please check that the app has proper permissions in system settings."
+                ) 
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showPermissionDialog = false
@@ -126,12 +136,12 @@ fun AppCategorySelectionScreen(
                     }
                     context.startActivity(intent)
                 }) {
-                    Text("Go to Settings")
+                    Text("Open Settings")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showPermissionDialog = false }) {
-                    Text("Cancel")
+                    Text("OK")
                 }
             }
         )

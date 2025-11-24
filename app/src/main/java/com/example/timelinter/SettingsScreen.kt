@@ -61,19 +61,21 @@ fun SettingsScreen(
     var responseTimer by remember { mutableStateOf(SettingsManager.getResponseTimer(context)) }
 
     // Function to check if we can query packages
+    // On Android 11+, package visibility is controlled by <queries> in manifest, not runtime permissions
     fun canQueryPackages(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val mainIntent = Intent(Intent.ACTION_MAIN, null)
-                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-                val resolveInfos = context.packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
-                resolveInfos.isNotEmpty()
-            } catch (e: Exception) {
-                Log.e("SettingsScreen", "Error checking package visibility", e)
-                false
-            }
-        } else {
-            true // Pre-Android 11, we can always query
+        return try {
+            val mainIntent = Intent(Intent.ACTION_MAIN, null)
+            mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
+            val resolveInfos = context.packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
+            // If we can query at all, we're good - the <queries> declaration in manifest handles visibility
+            true // Just try to query, don't block on count
+        } catch (e: SecurityException) {
+            Log.e("SettingsScreen", "Security exception checking package visibility", e)
+            false
+        } catch (e: Exception) {
+            Log.e("SettingsScreen", "Error checking package visibility", e)
+            // On error, assume we can't query (but this shouldn't happen with proper <queries> declaration)
+            false
         }
     }
 
@@ -127,27 +129,8 @@ fun SettingsScreen(
 
         // Load saved selections or use defaults
         val savedSelections = TimeWasterAppManager.getSelectedApps(context)
-        if (savedSelections.isEmpty()) {
-            // Pre-select common time-wasting apps if no saved selections
-            val commonTimeWasters = setOf(
-                "com.twitter.android", // X (Twitter)
-                "com.facebook.katana", // Facebook
-                "com.google.android.youtube", // YouTube
-                "com.netflix.mediaclient", // Netflix
-                "com.reddit.frontpage", // Reddit
-                "com.instagram.android", // Instagram
-                "com.tiktok.android", // TikTok
-                "com.snapchat.android", // Snapchat
-                "com.pinterest", // Pinterest
-                "com.linkedin.android" // LinkedIn
-            )
-            selectedApps = commonTimeWasters
-            TimeWasterAppManager.saveSelectedApps(context, commonTimeWasters)
-            Log.d("SettingsScreen", "Using default time-wasting apps")
-        } else {
-            selectedApps = savedSelections
-            Log.d("SettingsScreen", "Loaded ${savedSelections.size} saved selections")
-        }
+        selectedApps = savedSelections
+        Log.d("SettingsScreen", "Loaded ${savedSelections.size} saved selections")
     }
 
     // Helper function for flexible search
@@ -195,11 +178,13 @@ fun SettingsScreen(
                     if (showPermissionDialog) {
                         AlertDialog(
                             onDismissRequest = { showPermissionDialog = false },
-                            title = { Text("Permission Required") },
+                            title = { Text("Cannot Access Apps") },
                             text = {
                                 Text(
-                                    "Time Linter needs permission to see your installed apps. " +
-                                            "Please grant this permission in your system settings to continue."
+                                    "Time Linter cannot see your installed apps. " +
+                                            "This may be due to Android's package visibility restrictions. " +
+                                            "The app should work with the default settings, but if you're having issues, " +
+                                            "please check that the app has proper permissions in system settings."
                                 )
                             },
                             confirmButton = {
@@ -217,8 +202,8 @@ fun SettingsScreen(
                                 }
                             },
                             dismissButton = {
-                                Button(onClick = onNavigateBack) {
-                                    Text("Cancel")
+                                Button(onClick = { showPermissionDialog = false }) {
+                                    Text("OK")
                                 }
                             }
                         )
