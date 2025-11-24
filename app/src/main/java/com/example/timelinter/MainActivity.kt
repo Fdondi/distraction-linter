@@ -3,7 +3,6 @@ package com.example.timelinter
 import android.Manifest
 import android.app.AppOpsManager
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
