@@ -1,3 +1,6 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+@file:Suppress("OPT_IN_USAGE")
+
 package com.example.timelinter
 
 import android.app.KeyguardManager
@@ -32,12 +35,15 @@ import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.time.ZoneId
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.DurationUnit
+import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 import kotlin.time.toDuration
 
+@OptIn(ExperimentalTime::class)
 class AppUsageMonitorService : Service() {
     private val TAG = "AppUsageMonitorService"
     private val executor = Executors.newSingleThreadScheduledExecutor()
@@ -100,6 +106,9 @@ class AppUsageMonitorService : Service() {
     private var currentApp: String = ""
     private var lastAppChangeTime: Instant = timeProvider.now()
     private var currentAppSessionStart: Instant = timeProvider.now() // Track when current app session started
+    private val freeExpiryByApp: MutableMap<String, Instant> = mutableMapOf()
+    private val freeAllowancePrefs by lazy { getSharedPreferences("free_time_allowance_usage", Context.MODE_PRIVATE) }
+    private var freeAllowanceDay: String = currentDay()
 
     // Unified token bucket - owns its own state
     private lateinit var tokenBucket: TokenBucket
@@ -184,9 +193,6 @@ class AppUsageMonitorService : Service() {
              Log.d(TAG, "startMonitoring: Monitoring already scheduled. Skipping.")
              return
         }
-        
-        // Reset bucket to full if it's too low to prevent immediate triggers
-        tokenBucket.resetToFullIfTooLow()
         
         Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
         try {
@@ -525,16 +531,10 @@ class AppUsageMonitorService : Service() {
 
     private fun getAppInfoFromCurrentApp(): AppInfo? {
         val pkg = currentApp.takeIf { it.isNotEmpty() } ?: return null
-        return if (pkg.startsWith("web:")) {
-            val host = pkg.removePrefix("web:")
-            val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
-            AppInfo(packageName = pkg, readableName = host, isWasteful = wasteful, isGoodApp = false)
-        } else {
-            val readable = getReadableAppName(pkg)
-            val wasteful = isWastefulApp(pkg)
-            val goodApp = GoodAppManager.isGoodApp(applicationContext, pkg)
-            AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful, isGoodApp = goodApp)
-        }
+        val readable = getReadableAppName(pkg)
+        val wasteful = isWastefulApp(pkg)
+        val goodApp = GoodAppManager.isGoodApp(applicationContext, pkg)
+        return AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful, isGoodApp = goodApp)
     }
 
     private fun getCurrentAppUsage(): AppInfo? {
@@ -623,18 +623,6 @@ class AppUsageMonitorService : Service() {
                     Log.v(TAG, "Foreground is launcher; treating as no app")
                     return null
                 }
-                // Check if it is a browser and whether we have a hostname from the accessibility service
-                val browserHost = BrowserUrlAccessibilityService.getCurrentHostname()
-                if (browserHost != null && isBrowserPackage(currentForegroundApp)) {
-                    val wasteful = TimeWasterAppManager.isTimeWasterSite(applicationContext, browserHost)
-                    return AppInfo(
-                        packageName = "web:$browserHost",
-                        readableName = browserHost,
-                        isWasteful = wasteful,
-                        isGoodApp = false
-                    )
-                }
-
                 val readableName = getReadableAppName(currentForegroundApp)
                 val isWasteful = isWastefulApp(currentForegroundApp)
                 val isGoodApp = GoodAppManager.isGoodApp(applicationContext, currentForegroundApp)
@@ -671,8 +659,11 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun updateTimeTracking(appInfo: AppInfo?) {
+        val now = timeProvider.now()
+        ensureAllowanceDay(now)
         val detectedApp = appInfo?.packageName ?: ""
-        val isCurrentlyWasteful = appInfo?.isWasteful == true
+        val freeActive = appInfo?.packageName?.let { isInFreeWindow(it, now) } == true
+        val isCurrentlyWasteful = appInfo?.isWasteful == true && !freeActive
         val isCurrentlyGoodApp = appInfo?.isGoodApp == true
 
         // Determine the current app state
@@ -715,10 +706,12 @@ class AppUsageMonitorService : Service() {
         // ---------------- Existing time tracking logic ----------------
 
         // App change detection and time accumulation logic
-        val now = timeProvider.now()
         if (detectedApp != currentApp) {
              Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
              
+             // Clear any active free window for previous app
+             freeExpiryByApp.remove(currentApp)
+
              // Only log meaningful transitions (not "None → None")
              val previousApp = if (currentApp.isNotEmpty()) currentApp else "None"
              val newApp = if (detectedApp.isNotEmpty()) detectedApp else "None"
@@ -756,6 +749,7 @@ class AppUsageMonitorService : Service() {
                   sessionStart = now
                   Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
                   EventLogStore.logNewWastefulAppDetected(detectedApp)
+                  startFreeAllowanceIfEligible(detectedApp, now)
              }
          } else if (isCurrentlyWasteful) {
              // Accumulate time for current wasteful app
@@ -823,23 +817,7 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun isWastefulApp(packageName: String): Boolean {
-        return if (packageName.startsWith("web:")) {
-            val host = packageName.removePrefix("web:")
-            TimeWasterAppManager.isTimeWasterSite(applicationContext, host)
-        } else {
-            TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
-        }
-    }
-
-    private fun isBrowserPackage(pkg: String): Boolean {
-        return pkg in setOf(
-            "com.android.chrome",
-            "com.chrome.beta",
-            "com.chrome.dev",
-            "org.mozilla.firefox",
-            "com.sec.android.app.sbrowser",
-            "com.microsoft.emmx"
-        )
+        return TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
     }
 
     private fun showConversationNotification(appName: String = "Unknown App", sessionTime: Duration = Duration.ZERO, dailyTime: Duration = Duration.ZERO) {
@@ -887,6 +865,7 @@ class AppUsageMonitorService : Service() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(false)
             .setOngoing(false)
+            .setContentTitle(appName)
 
         try {
             notificationManager.notify(NOTIFICATION_ID, builder.build())
@@ -906,7 +885,7 @@ class AppUsageMonitorService : Service() {
 
     private fun createStatsNotification(): android.app.Notification {
         val monitoringStatus = "Monitoring: Active"
-        val (currentAppName, emoji) = if (currentApp.isNotEmpty()) {
+        val currentAppName = if (currentApp.isNotEmpty()) {
             val appName = getReadableAppName(currentApp)
             val wasteful = isWastefulApp(currentApp)
             val goodApp = GoodAppManager.isGoodApp(applicationContext, currentApp)
@@ -915,22 +894,29 @@ class AppUsageMonitorService : Service() {
                 goodApp -> "🌸"
                 else -> "?"
             }
-            Pair("$appName $emoji", emoji)
+            "$appName $emoji"
         } else {
-            Pair("(no app detected)", "?")
+            "(no app detected)"
         }
         val maxThreshold = SettingsManager.getMaxThreshold(this)
         val bucketRemaining = tokenBucket.getCurrentRemaining()
-        val maxOverfill = SettingsManager.getMaxOverfill(this)
+        val now = timeProvider.now()
+        val freeActive = currentApp.isNotEmpty() && isInFreeWindow(currentApp, now)
         
         // Always show the time, then add "full" if at max and won't increase without good apps
         val isAtMax = bucketRemaining >= maxThreshold
         val isWasteful = currentApp.isNotEmpty() && isWastefulApp(currentApp)
         val isGood = currentApp.isNotEmpty() && GoodAppManager.isGoodApp(applicationContext, currentApp)
         val willNotIncrease = isAtMax && !isGood // Won't increase if at max and not using good app
+        val bucketInUse = isWasteful && !freeActive
         
         val bucketText = buildString {
             append("Bucket: ${formatDuration(bucketRemaining)}")
+            if (bucketInUse) {
+                append(" (draining)")
+            } else if (freeActive) {
+                append(" (free time)")
+            }
             if (willNotIncrease) {
                 append(" (full)")
             } else if (isAtMax && isGood) {
@@ -946,9 +932,16 @@ class AppUsageMonitorService : Service() {
         // Calculate current app time when on a wasteful app
         // Use currentAppSessionStart to show total time on current app (not reset by accumulation cycles)
         val currentAppTime = if (isWasteful && currentApp.isNotEmpty()) {
-            val timeSpent = timeProvider.now() - currentAppSessionStart
+            val timeSpent = now - currentAppSessionStart
             // Always show current app time, no matter how long
             "Current App Time: ${formatDuration(timeSpent)}"
+        } else null
+        val freeTimeRemaining = if (freeActive) {
+            val expiry = freeExpiryByApp[currentApp]
+            val remaining = expiry?.let { it - now }
+            if (remaining != null && remaining.isPositive()) {
+                "Free time left: ${formatDuration(remaining)}"
+            } else null
         } else null
         
         Log.d(TAG, "Creating stats notification. App: $currentAppName (package: $currentApp), Session: ${sessionWastedTime}, Daily: ${dailyWastedTime}, Bucket: ${bucketRemaining}")
@@ -963,6 +956,9 @@ class AppUsageMonitorService : Service() {
             }
             if (currentAppTime != null) {
                 appendLine(currentAppTime)
+            }
+            if (freeTimeRemaining != null) {
+                appendLine(freeTimeRemaining)
             }
             appendLine("Session Time: ${formatDuration(sessionWastedTime)}")
             appendLine("Daily Time: ${formatDuration(dailyWastedTime)}")
@@ -1060,6 +1056,51 @@ class AppUsageMonitorService : Service() {
                 else -> packageName.substringAfterLast('.').replaceFirstChar { it.uppercase() }
             }
         }
+    }
+
+    // ---------- Free allowance helpers ----------
+    private fun currentDay(now: Instant = timeProvider.now()): String {
+        val javaInstant = java.time.Instant.ofEpochMilli(now.toEpochMilliseconds())
+        return javaInstant.atZone(ZoneId.systemDefault()).toLocalDate().toString()
+    }
+
+    private fun ensureAllowanceDay(now: Instant = timeProvider.now()) {
+        val today = currentDay(now)
+        if (today != freeAllowanceDay) {
+            freeAllowanceDay = today
+            freeExpiryByApp.clear()
+            freeAllowancePrefs.edit().clear().apply()
+        }
+    }
+
+    private fun getUsesUsedToday(packageName: String): Int {
+        return freeAllowancePrefs.getInt("uses_${freeAllowanceDay}_$packageName", 0)
+    }
+
+    private fun incrementUses(packageName: String) {
+        val key = "uses_${freeAllowanceDay}_$packageName"
+        val current = freeAllowancePrefs.getInt(key, 0)
+        freeAllowancePrefs.edit().putInt(key, current + 1).apply()
+    }
+
+    private fun isInFreeWindow(packageName: String, now: Instant): Boolean {
+        val expiry = freeExpiryByApp[packageName] ?: return false
+        if (now < expiry) return true
+        freeExpiryByApp.remove(packageName)
+        return false
+    }
+
+    private fun startFreeAllowanceIfEligible(packageName: String, now: Instant) {
+        val allowance = TimeWasterAppManager.getFreeAllowance(this, packageName, 10.minutes, 4)
+        val minutes = allowance.first
+        val usesPerDay = allowance.second
+        if (minutes <= Duration.ZERO || usesPerDay <= 0) return
+        val used = getUsesUsedToday(packageName)
+        if (used >= usesPerDay) return
+        incrementUses(packageName)
+        val expiry = now + minutes
+        freeExpiryByApp[packageName] = expiry
+        Log.i(TAG, "Free allowance started for $packageName: $minutes min (use ${used + 1}/$usesPerDay) until $expiry")
     }
     private fun formatDuration(duration: Duration): String {
         val hours = duration.inWholeHours

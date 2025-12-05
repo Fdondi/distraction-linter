@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Generic screen for managing app categories (good apps, bad apps, etc.)
@@ -31,6 +32,7 @@ fun AppCategorySelectionScreen(
     explanationLabel: String,
     explanationPlaceholder: String,
     manager: AppCategoryManager,
+    showFreeAllowance: Boolean = false,
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -188,7 +190,8 @@ fun AppCategorySelectionScreen(
                             isSelected = true,
                             explanationLabel = explanationLabel,
                             explanationPlaceholder = explanationPlaceholder,
-                            manager = manager,
+                    manager = manager,
+                    showFreeAllowance = showFreeAllowance,
                             onToggleSelection = { isSelected ->
                                 selectedApps = if (isSelected) {
                                     selectedApps + app.packageName
@@ -219,7 +222,8 @@ fun AppCategorySelectionScreen(
                         isSelected = false,
                         explanationLabel = explanationLabel,
                         explanationPlaceholder = explanationPlaceholder,
-                        manager = manager,
+                    manager = manager,
+                    showFreeAllowance = showFreeAllowance,
                         onToggleSelection = { isSelected ->
                             selectedApps = if (isSelected) {
                                 selectedApps + app.packageName
@@ -245,11 +249,14 @@ private fun AppCategoryListItem(
     explanationLabel: String,
     explanationPlaceholder: String,
     manager: AppCategoryManager,
+    showFreeAllowance: Boolean,
     onToggleSelection: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var explanation by remember { mutableStateOf(manager.getExplanation(context, app.packageName)) }
     var isEditing by remember { mutableStateOf(false) }
+    var freeMinutes by remember { mutableStateOf(manager.getFreeAllowance(context, app.packageName, 10.minutes, 4).first.inWholeMinutes.toString()) }
+    var freeUses by remember { mutableStateOf(manager.getFreeAllowance(context, app.packageName, 10.minutes, 4).second.toString()) }
 
     Column(
         modifier = Modifier
@@ -315,6 +322,40 @@ private fun AppCategoryListItem(
                 minLines = 2,
                 maxLines = 4
             )
+
+            if (showFreeAllowance) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 48.dp, end = 16.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = freeMinutes,
+                        onValueChange = { new ->
+                            freeMinutes = new.filter { it.isDigit() }
+                            val minutes = freeMinutes.toIntOrNull()?.toLong()?.minutes ?: 10.minutes
+                            val uses = freeUses.toIntOrNull() ?: 4
+                            manager.setFreeAllowance(context, app.packageName, minutes, uses)
+                        },
+                        label = { Text("Free minutes") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = freeUses,
+                        onValueChange = { new ->
+                            freeUses = new.filter { it.isDigit() }
+                            val minutes = freeMinutes.toIntOrNull()?.toLong()?.minutes ?: 10.minutes
+                            val uses = freeUses.toIntOrNull() ?: 4
+                            manager.setFreeAllowance(context, app.packageName, minutes, uses)
+                        },
+                        label = { Text("Free uses/day") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
     }
 }
@@ -328,6 +369,7 @@ fun AppSelectionScreen(onNavigateBack: () -> Unit) {
         explanationLabel = "Why is this a bad app?",
         explanationPlaceholder = "e.g., Too distracting, wastes time, addiction...",
         manager = AppCategoryManager("time_waster_apps", "TimeWasterAppManager"),
+        showFreeAllowance = true,
         onNavigateBack = onNavigateBack
     )
 }

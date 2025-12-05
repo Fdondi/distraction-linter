@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import org.json.JSONObject
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Generic manager for app categories (good apps, bad apps, etc.)
@@ -157,6 +158,45 @@ class AppCategoryManager(
             emptyMap()
         }
     }
+
+    /**
+     * Free allowance per app: duration per session and daily uses.
+     */
+    fun setFreeAllowance(context: Context, packageName: String, minutes: kotlin.time.Duration, dailyUses: Int) {
+        val prefs = getPreferences(context)
+        val minutesJson = prefs.getString("app_free_minutes", null)
+        val usesJson = prefs.getString("app_free_uses", null)
+
+        val minutesObj = try { if (minutesJson != null) JSONObject(minutesJson) else JSONObject() } catch (e: Exception) { JSONObject() }
+        val usesObj = try { if (usesJson != null) JSONObject(usesJson) else JSONObject() } catch (e: Exception) { JSONObject() }
+
+        minutesObj.put(packageName, minutes.inWholeMinutes)
+        usesObj.put(packageName, dailyUses)
+
+        prefs.edit()
+            .putString("app_free_minutes", minutesObj.toString())
+            .putString("app_free_uses", usesObj.toString())
+            .apply()
+    }
+
+    fun getFreeAllowance(context: Context, packageName: String, defaultMinutes: kotlin.time.Duration, defaultUses: Int): Pair<kotlin.time.Duration, Int> {
+        val prefs = getPreferences(context)
+        val minutesJson = prefs.getString("app_free_minutes", null)
+        val usesJson = prefs.getString("app_free_uses", null)
+
+        val minutes = try {
+            if (minutesJson != null) {
+                val raw = JSONObject(minutesJson).optInt(packageName, defaultMinutes.inWholeMinutes.toInt())
+                raw.coerceAtLeast(0).toLong().minutes
+            } else defaultMinutes
+        } catch (e: Exception) { defaultMinutes }
+
+        val uses = try {
+            if (usesJson != null) JSONObject(usesJson).optInt(packageName, defaultUses) else defaultUses
+        } catch (e: Exception) { defaultUses }
+
+        return Pair(minutes, uses)
+    }
 }
 
 // Singleton instances for the two main categories
@@ -178,6 +218,12 @@ object GoodAppManager {
     fun getExplanation(context: Context, packageName: String) = manager.getExplanation(context, packageName)
     
     fun getAllExplanations(context: Context) = manager.getAllExplanations(context)
+
+    fun setFreeAllowance(context: Context, packageName: String, minutes: kotlin.time.Duration, dailyUses: Int) =
+        manager.setFreeAllowance(context, packageName, minutes, dailyUses)
+
+    fun getFreeAllowance(context: Context, packageName: String, defaultMinutes: kotlin.time.Duration, defaultUses: Int) =
+        manager.getFreeAllowance(context, packageName, defaultMinutes, defaultUses)
 }
 
 object TimeWasterAppManager {
@@ -196,26 +242,12 @@ object TimeWasterAppManager {
     fun getExplanation(context: Context, packageName: String) = manager.getExplanation(context, packageName)
     
     fun getAllExplanations(context: Context) = manager.getAllExplanations(context)
-    
-    // Sites functionality (specific to time wasters)
-    private fun getPreferences(context: Context): SharedPreferences {
-        return context.getSharedPreferences("app_category_time_waster_apps", Context.MODE_PRIVATE)
-    }
-    
-    fun saveSelectedSites(context: Context, hostnames: Set<String>) {
-        getPreferences(context).edit().apply {
-            putStringSet("selected_sites", hostnames)
-            apply()
-        }
-        Log.d("TimeWasterAppManager", "Saved ${hostnames.size} selected sites")
-    }
 
-    fun getSelectedSites(context: Context): Set<String> {
-        return getPreferences(context).getStringSet("selected_sites", emptySet()) ?: emptySet()
-    }
+    fun setFreeAllowance(context: Context, packageName: String, minutes: kotlin.time.Duration, dailyUses: Int) =
+        manager.setFreeAllowance(context, packageName, minutes, dailyUses)
 
-    fun isTimeWasterSite(context: Context, hostname: String): Boolean {
-        return getSelectedSites(context).contains(hostname)
-    }
+    fun getFreeAllowance(context: Context, packageName: String, defaultMinutes: kotlin.time.Duration, defaultUses: Int) =
+        manager.getFreeAllowance(context, packageName, defaultMinutes, defaultUses)
+    
 }
 
