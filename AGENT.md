@@ -25,3 +25,5 @@ This initial conversation will be added to the AI history and sent every time, b
 6a) User did not respond within timeout. Add *no response* to the AI conversation, decorated as all user messages. Do NOT update the UI conversation. Continue.
 6b) User answers. Save the response in both AI and UI conversations, AI one decorated. Continue. 
 7) Go to 2) 
+
+IMPORTANT NOTE: We target API 30 and above, do not add checks for lower versions.

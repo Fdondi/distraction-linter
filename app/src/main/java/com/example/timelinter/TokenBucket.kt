@@ -1,6 +1,7 @@
 package com.example.timelinter
 
 import android.content.Context
+import android.util.Log
 import kotlin.time.Duration
 import kotlin.time.Instant
 
@@ -50,9 +51,27 @@ enum class AppState {
             delta: Duration,
             config: TokenBucketConfig
         ): Duration {
-            // Decay overfill if present, nothing otherwise
-            if (currentRemaining <= config.maxThreshold)
+            // If below max threshold, refill using normal replenishment with neutral multiplier
+            if (currentRemaining < config.maxThreshold) {
+                // Apply normal replenishment using intervals with neutral app multiplier
+                if (config.replenishInterval <= Duration.ZERO || config.replenishAmount <= Duration.ZERO || delta <= Duration.ZERO) {
+                    return currentRemaining
+                }
+                val neutralMultiplier = SettingsManager.getNeutralAppFillRateMultiplier(config.context)
+                if (neutralMultiplier <= 0.0f) {
+                    return currentRemaining
+                }
+                val fillDuration = delta * neutralMultiplier.toDouble()
+                val replenishmentRate = fillDuration / config.replenishInterval
+                val actualReplenishment = config.replenishAmount * replenishmentRate
+                val refilled = minOf(config.maxThreshold, currentRemaining + actualReplenishment)
+                return refilled
+            }
+            
+            // If at or above max threshold, decay overfill if present
+            if (currentRemaining <= config.maxThreshold) {
                 return currentRemaining
+            }
 
             val overfillDecayPerHour = getOverfillDecayPerHour(config.context)
             if(overfillDecayPerHour <= Duration.ZERO)
@@ -112,8 +131,8 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         
         // The appState's updateRemainingTime will handle the logic:
         // - WASTEFUL: deducts delta
-        // - GOOD: adds time
-        // - NEUTRAL: only decays overfill if present
+        // - GOOD: adds time (with multiplier)
+        // - NEUTRAL: refills when below max (with neutral multiplier), decays overfill when above max
         val newRemaining = appState.updateRemainingTime(currentRemaining, delta, config)
         val clampedRemaining = clampWithOverfill(newRemaining, config)
         
@@ -146,6 +165,26 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
 
     fun persistCurrentState() {
         SettingsManager.setThresholdRemaining(context, currentRemaining)
+    }
+
+    /**
+     * Reset the bucket to full (max threshold) if it's currently empty or below a minimum threshold.
+     * This ensures users get the full threshold time before triggering when monitoring starts.
+     * 
+     * @param minimumThreshold Minimum remaining time below which the bucket should be reset to full.
+     *                         If null, uses 10% of max threshold as the minimum.
+     */
+    fun resetToFullIfTooLow(minimumThreshold: Duration? = null) {
+        val config = getCurrentConfig()
+        val minThreshold = minimumThreshold ?: (config.maxThreshold * 0.1)
+        
+        if (currentRemaining < minThreshold) {
+            Log.d("TokenBucket", "Resetting bucket from ${currentRemaining.inWholeSeconds}s to ${config.maxThreshold.inWholeSeconds}s (was below minimum ${minThreshold.inWholeSeconds}s)")
+            currentRemaining = config.maxThreshold
+            lastUpdate = timeProvider.now()
+            lastAppState = null // Reset state tracking
+            persistCurrentState()
+        }
     }
 }
 

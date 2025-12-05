@@ -38,6 +38,7 @@ object SettingsManager {
     private const val DEFAULT_MAX_OVERFILL_MINUTES = 30
     private const val DEFAULT_OVERFILL_DECAY_PER_HOUR_MINUTES = 10
     private const val DEFAULT_GOOD_APP_FILL_RATE_MULTIPLIER = 2
+    private const val DEFAULT_NEUTRAL_APP_FILL_RATE_MULTIPLIER = 1
 
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -157,5 +158,13 @@ object SettingsManager {
 
     fun setGoodAppFillRateMultiplier(context: Context, multiplier: Float) {
         getPreferences(context).edit { putFloat(GOOD_APP_FILL_RATE_MULTIPLIER_KEY, multiplier) }
+    }
+
+    fun getNeutralAppFillRateMultiplier(context: Context): Float {
+        return getPreferences(context).getFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, DEFAULT_NEUTRAL_APP_FILL_RATE_MULTIPLIER.toFloat())
+    }
+
+    fun setNeutralAppFillRateMultiplier(context: Context, multiplier: Float) {
+        getPreferences(context).edit { putFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, multiplier) }
     }
 }

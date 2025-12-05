@@ -185,6 +185,9 @@ class AppUsageMonitorService : Service() {
              return
         }
         
+        // Reset bucket to full if it's too low to prevent immediate triggers
+        tokenBucket.resetToFullIfTooLow()
+        
         Log.d(TAG, "startMonitoring: Scheduling tasks. Check: $checkIntervalSeconds s, Stats: $statsUpdateIntervalSeconds s")
         try {
             // Schedule the main interaction loop
@@ -1069,11 +1072,11 @@ class AppUsageMonitorService : Service() {
             if (minutes > 0) {
                 append("$minutes m ")
             }
-            if (seconds > 0) {
-                append("$seconds s")
-            }
+            // Always show seconds, even if 0, to ensure we always display something
+            append("$seconds s")
         }
-        return res
+        // Always return at least "0 s" if duration is zero or very small
+        return res.ifEmpty { "0 s" }
     }
 
     private fun readRawResource(resourceId: Int): String {
