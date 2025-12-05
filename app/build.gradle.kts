@@ -102,8 +102,6 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    // AndroidX Security for EncryptedSharedPreferences
-    implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.datetime)
 
 }
