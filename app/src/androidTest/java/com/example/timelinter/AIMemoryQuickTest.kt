@@ -79,15 +79,15 @@ class AIMemoryQuickTest {
         // Test the ToolCommand.Remember processing
         val rememberCommand = ToolCommand.Remember(
             content = "User wants to make a good impression at work.",
-            durationMinutes = null // null means permanent
+            duration = null // null means permanent
         )
         
         // When - Process the remember command
         when (rememberCommand) {
             is ToolCommand.Remember -> {
-                val durationMinutes = rememberCommand.durationMinutes
-                if (durationMinutes != null) {
-                    AIMemoryManager.addTemporaryMemory(appContext, rememberCommand.content, durationMinutes)
+                val duration = rememberCommand.duration
+                if (duration != null) {
+                    AIMemoryManager.addTemporaryMemory(appContext, rememberCommand.content, duration)
                 } else {
                     AIMemoryManager.addPermanentMemory(appContext, rememberCommand.content)
                 }

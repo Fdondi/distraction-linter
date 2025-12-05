@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.time.Duration.Companion.minutes
 
 @RunWith(AndroidJUnit4::class)
 class AIMemoryEditingInstrumentedTest {
@@ -49,7 +50,7 @@ class AIMemoryEditingInstrumentedTest {
 	@Test
 	fun setPermanentMemory_keepsTemporaryMemoriesIntact() {
 		// Given a temporary memory active
-		AIMemoryManager.addTemporaryMemory(appContext, "Temp 1", 10, fakeTime)
+        AIMemoryManager.addTemporaryMemory(appContext, "Temp 1", 10.minutes, fakeTime)
 		val tempOnly = AIMemoryManager.getAllMemories(appContext, fakeTime)
 		assertTrue(tempOnly.contains("Temp 1"))
 

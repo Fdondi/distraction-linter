@@ -2,6 +2,7 @@ package com.example.timelinter
 
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Tests for the conversation archive memory extraction feature.
@@ -31,8 +32,8 @@ class ArchiveMemoryTest {
         
         assertEquals("First memory content", "User prefers to focus on work between 9am-12pm", first.content)
         assertEquals("Second memory content", "User gets distracted by social media in the afternoon", second.content)
-        assertNull("Should be permanent by default", first.durationMinutes)
-        assertNull("Should be permanent by default", second.durationMinutes)
+        assertNull("Should be permanent by default", first.duration)
+        assertNull("Should be permanent by default", second.duration)
     }
 
     @Test
@@ -67,7 +68,7 @@ class ArchiveMemoryTest {
         
         val rememberTool = parsedResponse.tools[0] as ToolCommand.Remember
         assertEquals("Memory content", "User is on vacation", rememberTool.content)
-        assertEquals("Should be temporary for 1 week", 10080, rememberTool.durationMinutes)
+        assertEquals("Should be temporary for 1 week", 10080.minutes, rememberTool.duration)
     }
 
     @Test
@@ -90,9 +91,9 @@ class ArchiveMemoryTest {
         val second = parsedResponse.tools[1] as ToolCommand.Remember
         val third = parsedResponse.tools[2] as ToolCommand.Remember
         
-        assertEquals("First is permanent", null, first.durationMinutes)
-        assertEquals("Second is temporary", 10080, second.durationMinutes)
-        assertEquals("Third is permanent", null, third.durationMinutes)
+        assertEquals("First is permanent", null, first.duration)
+        assertEquals("Second is temporary", 10080.minutes, second.duration)
+        assertEquals("Third is permanent", null, third.duration)
     }
 
     @Test

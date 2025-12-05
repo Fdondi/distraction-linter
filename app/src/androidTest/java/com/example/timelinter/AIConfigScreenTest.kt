@@ -93,11 +93,7 @@ class AIConfigScreenTest {
         AIConfigManager.setModelForTask(
             context,
             AITask.FIRST_MESSAGE,
-            AIModelConfig(
-                modelName = "gemini-2.5-flash",
-                displayName = "Gemini 2.5 Flash",
-                provider = AIProvider.GOOGLE_AI
-            )
+            AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         )
 
         // Click reset button
@@ -119,11 +115,7 @@ class AIConfigScreenTest {
         AIConfigManager.setModelForTask(
             context,
             AITask.FIRST_MESSAGE,
-            AIModelConfig(
-                modelName = "gemini-2.5-flash",
-                displayName = "Gemini 2.5 Flash",
-                provider = AIProvider.GOOGLE_AI
-            )
+            AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         )
 
         // Click export button

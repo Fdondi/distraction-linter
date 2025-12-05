@@ -2,6 +2,8 @@ package com.example.timelinter
 
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 /**
  * Simple unit tests for AI memory functionality that don't require Mockito.
@@ -14,11 +16,11 @@ class AIMemorySimpleTest {
         // Test that ToolCommand.Remember can be created correctly
         val rememberCommand = ToolCommand.Remember(
             content = "User is working for Google temporarily and wants to make a good impression.",
-            durationMinutes = null // null means permanent
+            duration = null // null means permanent
         )
         
         assertEquals("Content should match", "User is working for Google temporarily and wants to make a good impression.", rememberCommand.content)
-        assertNull("Duration should be null for permanent memory", rememberCommand.durationMinutes)
+        assertNull("Duration should be null for permanent memory", rememberCommand.duration)
     }
 
     @Test
@@ -26,22 +28,22 @@ class AIMemorySimpleTest {
         // Test that ToolCommand.Remember can be created with duration
         val rememberCommand = ToolCommand.Remember(
             content = "User is currently focused on YouTube",
-            durationMinutes = 15
+            duration = 15.minutes
         )
         
         assertEquals("Content should match", "User is currently focused on YouTube", rememberCommand.content)
-        assertEquals("Duration should match", 15, rememberCommand.durationMinutes)
+        assertEquals("Duration should match", 15.minutes, rememberCommand.duration)
     }
 
     @Test
     fun testToolCommandAllowCreation() {
         // Test that ToolCommand.Allow can be created correctly
         val allowCommand = ToolCommand.Allow(
-            minutes = 15,
+            duration = 15.minutes,
             app = "YouTube"
         )
         
-        assertEquals("Minutes should match", 15, allowCommand.minutes)
+        assertEquals("Minutes should match", 15.minutes, allowCommand.duration)
         assertEquals("App should match", "YouTube", allowCommand.app)
     }
 
@@ -49,11 +51,11 @@ class AIMemorySimpleTest {
     fun testToolCommandAllowWithoutApp() {
         // Test that ToolCommand.Allow can be created without app
         val allowCommand = ToolCommand.Allow(
-            minutes = 15,
+            duration = 15.minutes,
             app = null
         )
         
-        assertEquals("Minutes should match", 15, allowCommand.minutes)
+        assertEquals("Minutes should match", 15.minutes, allowCommand.duration)
         assertNull("App should be null", allowCommand.app)
     }
 
@@ -62,7 +64,7 @@ class AIMemorySimpleTest {
         // Test that ParsedResponse can be created correctly
         val tools = listOf(
             ToolCommand.Remember("User is working for Google temporarily and wants to make a good impression.", null),
-            ToolCommand.Allow(15, "YouTube")
+            ToolCommand.Allow(15.minutes, "YouTube")
         )
         
         val parsedResponse = ParsedResponse(
@@ -80,6 +82,7 @@ class AIMemorySimpleTest {
         // Test that MemoryItem can be created correctly
         val memoryItem = MemoryItem(
             content = "User is working for Google temporarily and wants to make a good impression.",
+            createdAt = Instant.fromEpochMilliseconds(0),
             expiresAt = null // null means permanent
         )
         
@@ -92,11 +95,12 @@ class AIMemorySimpleTest {
         // Test that MemoryItem can be created with expiration
         val memoryItem = MemoryItem(
             content = "User is currently focused on YouTube",
-            expiresAt = 1000L
+            createdAt = Instant.fromEpochMilliseconds(0),
+            expiresAt = Instant.fromEpochMilliseconds(1000)
         )
         
         assertEquals("Content should match", "User is currently focused on YouTube", memoryItem.content)
-        assertEquals("ExpiresAt should match", 1000L, memoryItem.expiresAt)
+        assertEquals("ExpiresAt should match", Instant.fromEpochMilliseconds(1000), memoryItem.expiresAt)
     }
 
     @Test
@@ -104,13 +108,13 @@ class AIMemorySimpleTest {
         // Test the logic for processing ToolCommand.Remember
         val rememberCommand = ToolCommand.Remember(
             content = "User is working for Google temporarily and wants to make a good impression.",
-            durationMinutes = null
+            duration = null
         )
         
         // Simulate the processing logic from AppUsageMonitorService
-        val durationMinutes = rememberCommand.durationMinutes
-        val isPermanent = durationMinutes == null
-        val isTemporary = durationMinutes != null
+        val duration = rememberCommand.duration
+        val isPermanent = duration == null
+        val isTemporary = duration != null
         
         assertTrue("Should be permanent when durationMinutes is null", isPermanent)
         assertFalse("Should not be temporary when durationMinutes is null", isTemporary)
@@ -121,17 +125,17 @@ class AIMemorySimpleTest {
         // Test the logic for processing ToolCommand.Remember with duration
         val rememberCommand = ToolCommand.Remember(
             content = "User is currently focused on YouTube",
-            durationMinutes = 15
+            duration = 15.minutes
         )
         
         // Simulate the processing logic from AppUsageMonitorService
-        val durationMinutes = rememberCommand.durationMinutes
-        val isPermanent = durationMinutes == null
-        val isTemporary = durationMinutes != null
+        val duration = rememberCommand.duration
+        val isPermanent = duration == null
+        val isTemporary = duration != null
         
         assertFalse("Should not be permanent when durationMinutes is not null", isPermanent)
         assertTrue("Should be temporary when durationMinutes is not null", isTemporary)
-        assertEquals("Duration should be 15", 15, durationMinutes)
+        assertEquals("Duration should be 15", 15.minutes, duration)
     }
 
     @Test
@@ -160,7 +164,7 @@ class AIMemorySimpleTest {
     fun testToolCommandSealedClassHierarchy() {
         // Test that ToolCommand sealed class hierarchy works correctly
         val rememberCommand: ToolCommand = ToolCommand.Remember("test", null)
-        val allowCommand: ToolCommand = ToolCommand.Allow(15, "YouTube")
+        val allowCommand: ToolCommand = ToolCommand.Allow(15.minutes, "YouTube")
         
         assertTrue("Remember should be instance of ToolCommand", rememberCommand is ToolCommand)
         assertTrue("Allow should be instance of ToolCommand", allowCommand is ToolCommand)
@@ -172,7 +176,7 @@ class AIMemorySimpleTest {
     fun testToolCommandWhenExpression() {
         // Test that when expressions work correctly with ToolCommand
         val rememberCommand: ToolCommand = ToolCommand.Remember("test", null)
-        val allowCommand: ToolCommand = ToolCommand.Allow(15, "YouTube")
+        val allowCommand: ToolCommand = ToolCommand.Allow(15.minutes, "YouTube")
         
         // Test when expression for Remember
         val rememberResult = when (rememberCommand) {

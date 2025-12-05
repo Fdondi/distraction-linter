@@ -8,6 +8,8 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Test that good apps list is included in AI conversation context
@@ -30,7 +32,8 @@ class GoodAppsAIContextTest {
             systemPrompt = "You are a helpful coach.",
             aiMemoryTemplate = "Memory: {{AI_MEMORY}}",
             userInfoTemplate = "{{FIXED_USER_PROMPT}}\n{{CURRENT_USER_PROMPT}}\n{{AUTOMATED_DATA}}\n{{USER_MESSAGE}}",
-            userInteractionTemplate = "Time: {{CURRENT_TIME_AND_DATE}}\nApp: {{APP_NAME}}\nSession: {{SESSION_TIME}}\nDaily: {{DAILY_TIME}}\n{{GOOD_APPS_LINE}}\nMessage: {{USER_MESSAGE}}"
+            userInteractionTemplate = "Time: {{CURRENT_TIME_AND_DATE}}\nApp: {{APP_NAME}}\nSession: {{SESSION_TIME}}\nDaily: {{DAILY_TIME}}\n{{GOOD_APPS_LINE}}\nMessage: {{USER_MESSAGE}}",
+            timeProvider = SystemTimeProvider
         )
     }
 
@@ -48,8 +51,8 @@ class GoodAppsAIContextTest {
         // Start a new session
         conversationManager.startNewSession(
             appName = "TestApp",
-            sessionTimeMs = 0L,
-            dailyTimeMs = 0L
+            sessionTime = Duration.ZERO,
+            dailyTime = Duration.ZERO
         )
         
         // Get API history
@@ -73,14 +76,14 @@ class GoodAppsAIContextTest {
         GoodAppManager.saveSelectedApps(context, setOf("com.example.duolingo"))
         
         // Start session
-        conversationManager.startNewSession("TestApp", 0L, 0L)
+        conversationManager.startNewSession("TestApp", Duration.ZERO, Duration.ZERO)
         
         // Add a user message
         conversationManager.addUserMessage(
             messageText = "I'm trying to stay focused",
             currentAppName = "TestApp",
-            sessionTimeMs = 60000L,
-            dailyTimeMs = 120000L
+            sessionTime = 60000.milliseconds,
+            dailyTime = 120000.milliseconds
         )
         
         // Get just the new message
@@ -103,7 +106,7 @@ class GoodAppsAIContextTest {
             GoodAppManager.getSelectedAppDisplayNames(context))
         
         // Start session
-        conversationManager.startNewSession("TestApp", 0L, 0L)
+        conversationManager.startNewSession("TestApp", Duration.ZERO, Duration.ZERO)
         
         // Get initialization context
         val apiHistory = conversationManager.getHistoryForAPI()
@@ -123,7 +126,7 @@ class GoodAppsAIContextTest {
         GoodAppManager.saveSelectedApps(context, apps)
         
         // Start session
-        conversationManager.startNewSession("TestApp", 0L, 0L)
+        conversationManager.startNewSession("TestApp", Duration.ZERO, Duration.ZERO)
         
         // Get initialization context
         val apiHistory = conversationManager.getHistoryForAPI()
@@ -140,7 +143,7 @@ class GoodAppsAIContextTest {
     fun testGoodAppsUpdated_ReflectedInNewSession() {
         // Start with one good app
         GoodAppManager.saveSelectedApps(context, setOf("com.example.app1"))
-        conversationManager.startNewSession("TestApp", 0L, 0L)
+        conversationManager.startNewSession("TestApp", Duration.ZERO, Duration.ZERO)
         
         val firstSessionHistory = conversationManager.getHistoryForAPI()
         val firstText = firstSessionHistory.joinToString("\n") { content ->
@@ -151,7 +154,7 @@ class GoodAppsAIContextTest {
         GoodAppManager.saveSelectedApps(context, setOf("com.example.app1", "com.example.app2"))
         
         // Start a new session after the update
-        conversationManager.startNewSession("TestApp", 0L, 0L)
+        conversationManager.startNewSession("TestApp", Duration.ZERO, Duration.ZERO)
         
         val secondSessionHistory = conversationManager.getHistoryForAPI()
         val secondText = secondSessionHistory.joinToString("\n") { content ->

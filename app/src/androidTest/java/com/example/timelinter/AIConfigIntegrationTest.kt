@@ -33,7 +33,8 @@ class AIConfigIntegrationTest {
             systemPrompt = "Test system prompt",
             aiMemoryTemplate = "Test memory: {{AI_MEMORY}}",
             userInfoTemplate = "Test user info",
-            userInteractionTemplate = "Test interaction"
+            userInteractionTemplate = "Test interaction",
+            timeProvider = SystemTimeProvider
         )
     }
 
@@ -57,11 +58,7 @@ class AIConfigIntegrationTest {
     @Test
     fun testAIInteractionManagerUsesCustomConfiguration() {
         // Set custom configuration
-        val customModel = AIModelConfig(
-            id = "gemini-2.5-flash",
-            displayName = "Gemini 2.5 Flash",
-            provider = AIProvider.GOOGLE_AI
-        )
+        val customModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         AIConfigManager.setModelForTask(context, AITask.FIRST_MESSAGE, customModel)
         
         // Create AIInteractionManager
@@ -75,16 +72,8 @@ class AIConfigIntegrationTest {
     @Test
     fun testAIInteractionManagerWithSpecificTask() {
         // Set different models for different tasks
-        val firstMessageModel = AIModelConfig(
-            modelName = "gemini-2.5-pro",
-            displayName = "Gemini 2.5 Pro",
-            provider = AIProvider.GOOGLE_AI
-        )
-        val followupModel = AIModelConfig(
-            modelName = "gemini-2.5-flash-lite",
-            displayName = "Gemini 2.5 Flash Lite",
-            provider = AIProvider.GOOGLE_AI
-        )
+        val firstMessageModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_PRO)
+        val followupModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH_LITE)
         
         AIConfigManager.setModelForTask(context, AITask.FIRST_MESSAGE, firstMessageModel)
         AIConfigManager.setModelForTask(context, AITask.FOLLOWUP_NO_RESPONSE, followupModel)
@@ -104,16 +93,8 @@ class AIConfigIntegrationTest {
     @Test
     fun testSwitchTaskInAIInteractionManager() {
         // Set different models for different tasks
-        val firstMessageModel = AIModelConfig(
-            modelName = "gemini-2.5-pro",
-            displayName = "Gemini 2.5 Pro",
-            provider = AIProvider.GOOGLE_AI
-        )
-        val userResponseModel = AIModelConfig(
-            modelName = "gemini-2.5-flash",
-            displayName = "Gemini 2.5 Flash",
-            provider = AIProvider.GOOGLE_AI
-        )
+        val firstMessageModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_PRO)
+        val userResponseModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         
         AIConfigManager.setModelForTask(context, AITask.FIRST_MESSAGE, firstMessageModel)
         AIConfigManager.setModelForTask(context, AITask.USER_RESPONSE, userResponseModel)
@@ -136,11 +117,7 @@ class AIConfigIntegrationTest {
     @Test
     fun testConfigurationPersistenceAcrossInstances() {
         // Set configuration
-        val customModel = AIModelConfig(
-            modelName = "gemini-2.5-flash",
-            displayName = "Gemini 2.5 Flash",
-            provider = AIProvider.GOOGLE_AI
-        )
+        val customModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         AIConfigManager.setModelForTask(context, AITask.FIRST_MESSAGE, customModel)
         
         // Create first instance
@@ -157,11 +134,7 @@ class AIConfigIntegrationTest {
     @Test
     fun testResetToDefaultsAffectsNewInstances() {
         // Set custom configuration
-        val customModel = AIModelConfig(
-            modelName = "gemini-2.5-flash",
-            displayName = "Gemini 2.5 Flash",
-            provider = AIProvider.GOOGLE_AI
-        )
+        val customModel = AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         AIConfigManager.setModelForTask(context, AITask.FIRST_MESSAGE, customModel)
         
         // Verify custom config is set
@@ -185,17 +158,17 @@ class AIConfigIntegrationTest {
         AIConfigManager.setModelForTask(
             context, 
             AITask.FIRST_MESSAGE,
-            AIModelConfig("gemini-2.5-pro", "Gemini 2.5 Pro", AIProvider.GOOGLE_AI)
+            AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_PRO)
         )
         AIConfigManager.setModelForTask(
             context,
             AITask.FOLLOWUP_NO_RESPONSE,
-            AIModelConfig("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", AIProvider.GOOGLE_AI)
+            AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH_LITE)
         )
         AIConfigManager.setModelForTask(
             context,
             AITask.USER_RESPONSE,
-            AIModelConfig("gemini-2.5-flash", "Gemini 2.5 Flash", AIProvider.GOOGLE_AI)
+            AIModelConfig.AVAILABLE_MODELS.getValue(AIModelId.GEMINI_25_FLASH)
         )
         
         // Verify all three tasks have different models

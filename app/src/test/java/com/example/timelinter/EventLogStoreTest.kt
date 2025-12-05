@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlin.time.Duration.Companion.minutes
 
 class EventLogStoreTest {
 
@@ -40,7 +41,7 @@ class EventLogStoreTest {
     fun search_matches_title_details_role_and_type_caseInsensitive() {
         EventLogStore.logSystem("Boot sequence started")
         EventLogStore.logMessage("user", "I feel distracted")
-        EventLogStore.logTool(ToolCommand.Allow(5, app = "YouTube"))
+        EventLogStore.logTool(ToolCommand.Allow(5.minutes, app = "YouTube"))
 
         // by details
         val byApp = EventLogStore.search("youtube")

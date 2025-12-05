@@ -1,7 +1,10 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.example.timelinter
 
 import android.content.Context
 import android.util.Log
+import kotlin.time.ExperimentalTime
 import kotlin.time.Instant
 
 sealed class InteractionState {

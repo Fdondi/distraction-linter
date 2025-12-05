@@ -2,6 +2,7 @@ package com.example.timelinter
 
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Test that reproduces the exact scenario from the user's image to investigate
@@ -21,7 +22,7 @@ class AIMemoryScenarioTest {
             userMessage = "Oh, looks like you're still in the zone! No worries at all, just wanted to check in again and see if you're feeling good about your flow, especially with that Google impression in mind.",
             tools = listOf(
                 ToolCommand.Remember("User is working for Google temporarily and wants to make a good impression.", null),
-                ToolCommand.Allow(15, "YouTube")
+                ToolCommand.Allow(15.minutes, "YouTube")
             )
         )
         
@@ -33,15 +34,15 @@ class AIMemoryScenarioTest {
             when (tool) {
                 is ToolCommand.Allow -> {
                     // Allow command processing (simplified)
-                    println("Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
+                    println("Processing ALLOW tool: ${tool.duration.inWholeMinutes} minutes${tool.app?.let { " for $it" } ?: ""}")
                     allowProcessed = true
                 }
                 is ToolCommand.Remember -> {
                     println("Processing REMEMBER tool: ${tool.content}")
-                    val durationMinutes = tool.durationMinutes
-                    if (durationMinutes != null) {
+                    val duration = tool.duration
+                    if (duration != null) {
                         // Would call AIMemoryManager.addTemporaryMemory()
-                        println("Would add temporary memory: ${tool.content} for $durationMinutes minutes")
+                        println("Would add temporary memory: ${tool.content} for ${duration.inWholeMinutes} minutes")
                     } else {
                         // Would call AIMemoryManager.addPermanentMemory()
                         println("Would add permanent memory: ${tool.content}")
@@ -58,11 +59,11 @@ class AIMemoryScenarioTest {
         // Verify the memory content is correct
         val rememberCommand = parsedResponse.tools.first { it is ToolCommand.Remember } as ToolCommand.Remember
         assertEquals("Memory content should match", "User is working for Google temporarily and wants to make a good impression.", rememberCommand.content)
-        assertNull("Memory should be permanent", rememberCommand.durationMinutes)
+        assertNull("Memory should be permanent", rememberCommand.duration)
         
         // Verify the allow command is correct
         val allowCommand = parsedResponse.tools.first { it is ToolCommand.Allow } as ToolCommand.Allow
-        assertEquals("Allow minutes should match", 15, allowCommand.minutes)
+        assertEquals("Allow minutes should match", 15.minutes, allowCommand.duration)
         assertEquals("Allow app should match", "YouTube", allowCommand.app)
     }
 
@@ -123,13 +124,13 @@ class AIMemoryScenarioTest {
         // Test the complete flow of processing ToolCommand.Remember
         val rememberCommand = ToolCommand.Remember(
             content = "User is working for Google temporarily and wants to make a good impression.",
-            durationMinutes = null
+            duration = null
         )
         
         // When - Process the remember command (simulating AppUsageMonitorService logic)
-        val durationMinutes = rememberCommand.durationMinutes
-        val shouldAddPermanent = durationMinutes == null
-        val shouldAddTemporary = durationMinutes != null
+        val duration = rememberCommand.duration
+        val shouldAddPermanent = duration == null
+        val shouldAddTemporary = duration != null
         
         // Then - Verify processing logic
         assertTrue("Should add permanent memory when durationMinutes is null", shouldAddPermanent)
@@ -144,13 +145,13 @@ class AIMemoryScenarioTest {
         // Test the complete flow of processing ToolCommand.Remember with duration
         val rememberCommand = ToolCommand.Remember(
             content = "User is currently focused on YouTube",
-            durationMinutes = 15
+            duration = 15.minutes
         )
         
         // When - Process the remember command (simulating AppUsageMonitorService logic)
-        val durationMinutes = rememberCommand.durationMinutes
-        val shouldAddPermanent = durationMinutes == null
-        val shouldAddTemporary = durationMinutes != null
+        val duration = rememberCommand.duration
+        val shouldAddPermanent = duration == null
+        val shouldAddTemporary = duration != null
         
         // Then - Verify processing logic
         assertFalse("Should not add permanent memory when durationMinutes is not null", shouldAddPermanent)
@@ -158,7 +159,7 @@ class AIMemoryScenarioTest {
         
         // Verify the memory content and duration
         assertEquals("Memory content should match", "User is currently focused on YouTube", rememberCommand.content)
-        assertEquals("Duration should match", 15, durationMinutes)
+        assertEquals("Duration should match", 15.minutes, duration)
     }
 
     @Test
@@ -168,19 +169,19 @@ class AIMemoryScenarioTest {
             userMessage = "Oh, looks like you're still in the zone! No worries at all, just wanted to check in again and see if you're feeling good about your flow, especially with that Google impression in mind.",
             tools = listOf(
                 ToolCommand.Remember("User is working for Google temporarily and wants to make a good impression.", null),
-                ToolCommand.Allow(15, "YouTube")
+                ToolCommand.Allow(15.minutes, "YouTube")
             )
         )
         
         // When - Process the tools
         var memoryContent = ""
-        var allowMinutes = 0
+        var allowMinutes = 0L
         var allowApp = ""
         
         for (tool in parsedResponse.tools) {
             when (tool) {
                 is ToolCommand.Allow -> {
-                    allowMinutes = tool.minutes
+                    allowMinutes = tool.duration.inWholeMinutes
                     allowApp = tool.app ?: ""
                 }
                 is ToolCommand.Remember -> {
@@ -191,7 +192,7 @@ class AIMemoryScenarioTest {
         
         // Then - Verify both commands were processed correctly
         assertEquals("Memory content should match", "User is working for Google temporarily and wants to make a good impression.", memoryContent)
-        assertEquals("Allow minutes should match", 15, allowMinutes)
+        assertEquals("Allow minutes should match", 15L, allowMinutes)
         assertEquals("Allow app should match", "YouTube", allowApp)
         
         // Verify the user message
@@ -207,12 +208,12 @@ class AIMemoryScenarioTest {
         val storedMemory = initialMemory
         
         // Simulate conversation reset (allow command triggers reset)
-        val allowCommand = ToolCommand.Allow(15, "YouTube")
+        val allowCommand = ToolCommand.Allow(15.minutes, "YouTube")
         
         // Process allow command (this would trigger conversation reset in real app)
         when (allowCommand) {
             is ToolCommand.Allow -> {
-                println("Processing ALLOW tool: ${allowCommand.minutes} minutes${allowCommand.app?.let { " for $it" } ?: ""}")
+                println("Processing ALLOW tool: ${allowCommand.duration.inWholeMinutes} minutes${allowCommand.app?.let { " for $it" } ?: ""}")
                 // In real app, this would trigger conversationHistoryManager.clearHistories()
                 // but memory should persist
             }

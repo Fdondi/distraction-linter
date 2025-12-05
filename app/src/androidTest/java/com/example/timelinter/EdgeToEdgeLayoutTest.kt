@@ -10,8 +10,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowCompat
 import org.junit.Assert.*
 
 /**
@@ -78,21 +78,26 @@ class EdgeToEdgeLayoutTest {
     fun testWindowInsetsAreApplied() {
         composeTestRule.waitForIdle()
 
-        // Verify that WindowCompat.setDecorFitsSystemWindows is working
-        // by checking that content is properly padded
+        // Verify that the system bar insets are available and applied to layout
+        var statusBarInset = 0f
         composeTestRule.activity.runOnUiThread {
             val window = composeTestRule.activity.window
-            
-            // Get the root view
-            val rootView = window.decorView.rootView
-            
-            // Check that we're not fitting system windows (edge-to-edge mode)
-            val decorFitsSystemWindows = WindowCompat.getDecorFitsSystemWindows(window)
-            assertFalse(
-                "Window should NOT fit system windows for edge-to-edge mode",
-                decorFitsSystemWindows
-            )
+            val insets = ViewCompat.getRootWindowInsets(window.decorView)
+            statusBarInset =
+                insets?.getInsets(WindowInsetsCompat.Type.statusBars())?.top?.toFloat() ?: 0f
         }
+
+        // System bar inset should be greater than zero in edge-to-edge mode
+        assertTrue("Status bar inset should be reported", statusBarInset > 0f)
+
+        // Top bar content should be laid out below the status bar inset
+        val topBarButton = composeTestRule.onNodeWithContentDescription("Wasteful Apps")
+        topBarButton.assertExists()
+        val buttonBounds = topBarButton.fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Top bar should respect status bar inset",
+            buttonBounds.top >= statusBarInset
+        )
     }
 
     @Test

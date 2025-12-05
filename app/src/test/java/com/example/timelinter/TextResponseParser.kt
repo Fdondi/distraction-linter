@@ -1,6 +1,7 @@
 package com.example.timelinter
 
-import java.util.regex.Pattern
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Test helper to parse text-based function calls from AI responses.
@@ -39,7 +40,8 @@ object TextResponseParser {
         val rememberMatch = rememberPattern.find(trimmed)
         if (rememberMatch != null) {
             val content = rememberMatch.groupValues[1]
-            val duration = rememberMatch.groupValues.getOrNull(2)?.toIntOrNull()
+            val durationMinutes = rememberMatch.groupValues.getOrNull(2)?.toIntOrNull()
+            val duration: Duration? = durationMinutes?.minutes
             return ToolCommand.Remember(content, duration)
         }
         
@@ -49,7 +51,7 @@ object TextResponseParser {
         if (allowMatch != null) {
             val minutes = allowMatch.groupValues[1].toInt()
             val app = allowMatch.groupValues.getOrNull(2)?.takeIf { it.isNotBlank() }
-            return ToolCommand.Allow(minutes, app)
+            return ToolCommand.Allow(minutes.minutes, app)
         }
         
         return null

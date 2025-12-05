@@ -12,6 +12,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import kotlin.time.Duration.Companion.minutes
 
 class AIMemoryRulesAndTempUITest {
 
@@ -25,9 +26,9 @@ class AIMemoryRulesAndTempUITest {
 		AIMemoryManager.setPermanentMemory(context, "Permanent baseline")
 		AIMemoryManager.setMemoryRules(context, "Initial rules text")
 		// Add temp memories that expire on +1 day and +2 days
-		AIMemoryManager.addTemporaryMemory(context, "Temp A1", 24 * 60)
-		AIMemoryManager.addTemporaryMemory(context, "Temp A2", 24 * 60)
-		AIMemoryManager.addTemporaryMemory(context, "Temp B1", 48 * 60)
+        AIMemoryManager.addTemporaryMemory(context, "Temp A1", (24 * 60).minutes)
+        AIMemoryManager.addTemporaryMemory(context, "Temp A2", (24 * 60).minutes)
+        AIMemoryManager.addTemporaryMemory(context, "Temp B1", (48 * 60).minutes)
 	}
 
 	@After

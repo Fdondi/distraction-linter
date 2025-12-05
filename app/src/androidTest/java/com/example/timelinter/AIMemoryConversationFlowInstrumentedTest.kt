@@ -7,7 +7,7 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Instrumented test to investigate the specific AI memory conversation flow issue.
@@ -46,7 +46,7 @@ class AIMemoryConversationFlowInstrumentedTest {
             userMessage = "Oh, looks like you're still in the zone! No worries at all, just wanted to check in again and see if you're feeling good about your flow, especially with that Google impression in mind.",
             tools = listOf(
                 ToolCommand.Remember("User is working for Google temporarily and wants to make a good impression.", null),
-                ToolCommand.Allow(15, "YouTube")
+                ToolCommand.Allow(15.minutes, "YouTube")
             )
         )
         
@@ -58,14 +58,14 @@ class AIMemoryConversationFlowInstrumentedTest {
             when (tool) {
                 is ToolCommand.Allow -> {
                     // Allow command processing (simplified)
-                    println("Processing ALLOW tool: ${tool.minutes} minutes${tool.app?.let { " for $it" } ?: ""}")
+                    println("Processing ALLOW tool: ${tool.duration.inWholeMinutes} minutes${tool.app?.let { " for $it" } ?: ""}")
                     allowProcessed = true
                 }
                 is ToolCommand.Remember -> {
                     println("Processing REMEMBER tool: ${tool.content}")
-                    val durationMinutes = tool.durationMinutes
-                    if (durationMinutes != null) {
-                        AIMemoryManager.addTemporaryMemory(appContext, tool.content, durationMinutes, fakeTime)
+                    val duration = tool.duration
+                    if (duration != null) {
+                        AIMemoryManager.addTemporaryMemory(appContext, tool.content, duration, fakeTime)
                     } else {
                         AIMemoryManager.addPermanentMemory(appContext, tool.content)
                     }
@@ -127,12 +127,12 @@ class AIMemoryConversationFlowInstrumentedTest {
         AIMemoryManager.addPermanentMemory(appContext, initialMemory)
         
         // When - Simulate conversation reset (allow command triggers reset)
-        val allowCommand = ToolCommand.Allow(15, "YouTube")
+        val allowCommand = ToolCommand.Allow(15.minutes, "YouTube")
         
         // Process allow command (this would trigger conversation reset in real app)
         when (allowCommand) {
             is ToolCommand.Allow -> {
-                println("Processing ALLOW tool: ${allowCommand.minutes} minutes${allowCommand.app?.let { " for $it" } ?: ""}")
+                println("Processing ALLOW tool: ${allowCommand.duration.inWholeMinutes} minutes${allowCommand.app?.let { " for $it" } ?: ""}")
                 // In real app, this would trigger conversationHistoryManager.clearHistories()
                 // but memory should persist
             }
@@ -199,7 +199,7 @@ class AIMemoryConversationFlowInstrumentedTest {
         
         // When - Add both types of memories
         AIMemoryManager.addPermanentMemory(appContext, permanentMemory)
-        AIMemoryManager.addTemporaryMemory(appContext, tempMemory, 1, fakeTime) // 1 minute for quick testing
+        AIMemoryManager.addTemporaryMemory(appContext, tempMemory, 1.minutes, fakeTime) // 1 minute for quick testing
         
         // Then - Verify both are present initially
         val initialMemories = AIMemoryManager.getAllMemories(appContext, fakeTime)

@@ -1,7 +1,6 @@
 package com.example.timelinter
 
 import android.content.Context
-import android.util.Log
 import kotlin.time.Duration
 import kotlin.time.Instant
 
@@ -95,6 +94,7 @@ enum class AppState {
     ): Duration
 }
 
+@OptIn(kotlin.time.ExperimentalTime::class)
 class TokenBucket(private val context: Context, private val timeProvider: TimeProvider = SystemTimeProvider) {
     // The bucket owns its own state - store remaining time as Duration
     private var currentRemaining: Duration = Duration.ZERO
@@ -165,26 +165,6 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
 
     fun persistCurrentState() {
         SettingsManager.setThresholdRemaining(context, currentRemaining)
-    }
-
-    /**
-     * Reset the bucket to full (max threshold) if it's currently empty or below a minimum threshold.
-     * This ensures users get the full threshold time before triggering when monitoring starts.
-     * 
-     * @param minimumThreshold Minimum remaining time below which the bucket should be reset to full.
-     *                         If null, uses 10% of max threshold as the minimum.
-     */
-    fun resetToFullIfTooLow(minimumThreshold: Duration? = null) {
-        val config = getCurrentConfig()
-        val minThreshold = minimumThreshold ?: (config.maxThreshold * 0.1)
-        
-        if (currentRemaining < minThreshold) {
-            Log.d("TokenBucket", "Resetting bucket from ${currentRemaining.inWholeSeconds}s to ${config.maxThreshold.inWholeSeconds}s (was below minimum ${minThreshold.inWholeSeconds}s)")
-            currentRemaining = config.maxThreshold
-            lastUpdate = timeProvider.now()
-            lastAppState = null // Reset state tracking
-            persistCurrentState()
-        }
     }
 }
 

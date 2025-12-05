@@ -9,7 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 @RunWith(AndroidJUnit4::class)
 class TimeFlowsTest {
@@ -22,11 +23,12 @@ class TimeFlowsTest {
         appContext = InstrumentationRegistry.getInstrumentation().targetContext
         fakeTime = FakeTimeProvider(0L)
         // Default test-friendly timers
-        SettingsManager.setObserveTimerMinutes(appContext, 1)
-        SettingsManager.setResponseTimerMinutes(appContext, 1)
-        SettingsManager.setMaxThresholdMinutes(appContext, 1)
-        SettingsManager.setReplenishIntervalMinutes(appContext, 10)
-        SettingsManager.setReplenishAmountMinutes(appContext, 1)
+        SettingsManager.setObserveTimer(appContext, 1.minutes)
+        SettingsManager.setResponseTimer(appContext, 1.minutes)
+        SettingsManager.setMaxThreshold(appContext, 1.minutes)
+        SettingsManager.setReplenishInterval(appContext, 10.minutes)
+        SettingsManager.setReplenishAmount(appContext, 1.minutes)
+        SettingsManager.setThresholdRemaining(appContext, 1.minutes)
         AIMemoryManager.clearAllMemories(appContext)
     }
 
@@ -37,32 +39,22 @@ class TimeFlowsTest {
 
     @Test
     fun flow1_thresholdExceeded_triggersConversationStart() {
-        val config = TokenBucketConfig(
-            maxThresholdMs = TimeUnit.MINUTES.toMillis(1),
-            replenishIntervalMs = 0,
-            replenishAmountMs = 0
-        )
+        SettingsManager.setReplenishInterval(appContext, Duration.ZERO)
+        SettingsManager.setReplenishAmount(appContext, Duration.ZERO)
+        SettingsManager.setThresholdRemaining(appContext, 1.minutes)
+        val bucket = TokenBucket(appContext, fakeTime)
 
-        val startRemaining = TimeUnit.MINUTES.toMillis(1)
-        val lastUpdate = fakeTime.now()
-
-        // Advance time by 2 minutes while app is wasteful
+        // First tick establishes state (delta = 0)
+        bucket.update(AppState.WASTEFUL)
         fakeTime.advanceMinutes(2)
-        val update = TokenBucket.update(
-            previousRemainingMs = startRemaining,
-            previousAccumulatedNonWastefulMs = 0,
-            lastUpdateTimeMs = lastUpdate,
-            nowMs = fakeTime.now(),
-            isCurrentlyWasteful = true,
-            config = config
-        )
+        val remaining = bucket.update(AppState.WASTEFUL)
 
-        assertEquals(0L, update.newRemainingMs)
+        assertEquals(Duration.ZERO, remaining)
 
         val shouldTrigger = TriggerDecider.shouldTrigger(
             isWasteful = true,
             isAllowed = false,
-            remainingMs = update.newRemainingMs
+            remainingTime = remaining
         )
         assertTrue(shouldTrigger)
 
@@ -77,7 +69,7 @@ class TimeFlowsTest {
         val manager = InteractionStateManager(appContext, fakeTime)
         // Start from conversation, then ALLOW tool arrives
         manager.startConversation()
-        manager.applyAllowCommand(ToolCommand.Allow(minutes = 5))
+        manager.applyAllowCommand(ToolCommand.Allow(duration = 5.minutes))
         // Resets state
         assertTrue(manager.isInObservingState())
         // Allowed globally
@@ -90,7 +82,7 @@ class TimeFlowsTest {
     @Test
     fun flow3_waitingForResponse_timesOut() {
         val manager = InteractionStateManager(appContext, fakeTime)
-        SettingsManager.setResponseTimerMinutes(appContext, 1)
+        SettingsManager.setResponseTimer(appContext, 1.minutes)
         manager.startConversation()
         manager.startWaitingForResponse()
         // Not timed out immediately
@@ -107,7 +99,7 @@ class TimeFlowsTest {
     fun flow4_allowSpecificApp_appliesOnlyToThatApp_andExpires() {
         val manager = InteractionStateManager(appContext, fakeTime)
         manager.startConversation()
-        manager.applyAllowCommand(ToolCommand.Allow(minutes = 3, app = "YouTube"))
+        manager.applyAllowCommand(ToolCommand.Allow(duration = 3.minutes, app = "YouTube"))
         assertTrue(manager.isInObservingState())
         assertTrue(manager.isAllowed("YouTube"))
         assertFalse(manager.isAllowed("TikTok"))
@@ -118,7 +110,7 @@ class TimeFlowsTest {
     @Test
     fun flow5_temporaryMemory_expiresAfterDuration() {
         val note = "Avoid doomscrolling after 10pm"
-        AIMemoryManager.addTemporaryMemory(appContext, note, durationMinutes = 1, timeProvider = fakeTime)
+        AIMemoryManager.addTemporaryMemory(appContext, note, duration = 1.minutes, timeProvider = fakeTime)
         val before = AIMemoryManager.getAllMemories(appContext, timeProvider = fakeTime)
         assertTrue(before.contains(note))
         // Advance beyond expiry

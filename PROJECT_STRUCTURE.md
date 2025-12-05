@@ -108,10 +108,10 @@ Memory and Settings
     - `getActiveTemporaryGroupsByDate()` returns temporary memories grouped by YYYY‑MM‑DD expiration.
 
 - app/src/main/java/com/example/timelinter/SettingsManager.kt
-  - Reads/writes app settings not covered elsewhere.
+  - Reads/writes app settings not covered elsewhere (all Duration-based).
   - Unified bucket settings:
-    - `getMaxOverfillMinutes` / `setMaxOverfillMinutes` - maximum overfill beyond normal limit (default: 30 min)
-    - `getOverfillDecayPerHourMinutes` / `setOverfillDecayPerHourMinutes` - overfill decay rate (default: 10 min/hr)
+    - `getMaxOverfill` / `setMaxOverfill` - maximum overfill beyond normal limit (default: 30 min)
+    - `getOverfillDecayPerHour` / `setOverfillDecayPerHour` - overfill decay rate (default: 10 min/hr)
     - `getGoodAppFillRateMultiplier` / `setGoodAppFillRateMultiplier` - fill rate multiplier for good apps (default: 2.0x)
     - `getNeutralAppFillRateMultiplier` / `setNeutralAppFillRateMultiplier` - fill rate multiplier for neutral apps (default: 1.0x)
 
