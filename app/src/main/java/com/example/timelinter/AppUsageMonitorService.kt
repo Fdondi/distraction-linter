@@ -404,20 +404,17 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun generateAIResponse(appInfo: AppInfo?, task: AITask) {
-        val currentModel = aiManager.getInitializedModel(task)
-        if (currentModel == null) {
-            Log.e(TAG, "Cannot generate AI response: Model not initialized")
-            return
-        }
-
         serviceScope.launch {
             try {
-                val apiContents = conversationHistoryManager.getHistoryForAPI()
-                Log.d(TAG, "Sending to AI using task: ${task.displayName}. History size: ${apiContents.size}")
+                Log.d(TAG, "Sending to AI using task: ${task.displayName}")
 
-                val response = currentModel.generateContent(*apiContents.toTypedArray())
-                // Function-calling only: parse structured calls and model text
-                val parsedResponse = GeminiFunctionCallParser.parse(response)
+                val parsedResponse = aiManager.generateResponse(task)
+                
+                if (parsedResponse == null) {
+                     Log.e(TAG, "AI Response was null")
+                     return@launch
+                }
+
                 // Process tools
                 var shouldResetConversation = false
                 for (tool in parsedResponse.tools) {
@@ -766,12 +763,8 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun tryArchiveMemoriesThenClear(appInfo: AppInfo?) {
-        val currentModel = aiManager.getInitializedModel()
-        if (currentModel == null) {
-            Log.w(TAG, "Model not initialized; clearing histories without archive prompt")
-            conversationHistoryManager.clearHistories()
-            return
-        }
+        // No explicit check for model initialization; aiManager handles it
+        // and returns null/error if not ready.
 
         val appName = appInfo?.readableName ?: "Unknown App"
         // Add API-only user message asking for memory suggestions
@@ -786,34 +779,31 @@ class AppUsageMonitorService : Service() {
         // Build contents for a one-off generation using the updated API history
         val contents = conversationHistoryManager.getHistoryForAPI()
         val context = this
-        aiManager.generateFromContents(
-            contents = contents,
-            onResponse = fun(response: GenerateContentResponse?) {
-                if (response != null) {
-                    // Parse response for function calls
-                    val parsedResponse = GeminiFunctionCallParser.parse(response)
-                    
-                    // Process any remember() function calls
-                    for (tool in parsedResponse.tools) {
-                        if (tool is ToolCommand.Remember) {
-                            val duration = tool.duration
-                            if (duration != null) {
-                                AIMemoryManager.addTemporaryMemory(context, tool.content, duration, timeProvider)
-                            } else {
-                                AIMemoryManager.addPermanentMemory(context, tool.content)
-                            }
-                            Log.i(TAG, "Archived memory from conversation: ${tool.content}")
+        
+        serviceScope.launch {
+            // Use SUMMARY task for archiving
+            val parsedResponse = aiManager.generateFromContents(contents, AITask.SUMMARY)
+            
+            if (parsedResponse != null) {
+                // Process any remember() function calls
+                for (tool in parsedResponse.tools) {
+                    if (tool is ToolCommand.Remember) {
+                        val duration = tool.duration
+                        if (duration != null) {
+                            AIMemoryManager.addTemporaryMemory(context, tool.content, duration, timeProvider)
+                        } else {
+                            AIMemoryManager.addPermanentMemory(context, tool.content)
                         }
+                        Log.i(TAG, "Archived memory from conversation: ${tool.content}")
                     }
-                    
-                    // Update memory shown in log screen
-                    ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
                 }
-                // Finally clear histories for a new session
-                conversationHistoryManager.clearHistories()
-            },
-            task = AITask.SUMMARY // Use SUMMARY model for archival/summary
-        )
+                
+                // Update memory shown in log screen
+                ConversationLogStore.setMemory(AIMemoryManager.getAllMemories(context))
+            }
+            // Finally clear histories for a new session
+            conversationHistoryManager.clearHistories()
+        }
     }
 
     private fun isWastefulApp(packageName: String): Boolean {

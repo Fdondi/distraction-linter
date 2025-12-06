@@ -3,6 +3,7 @@ TimeLinter – Project Structure
 Overview
 - Purpose: Background service that monitors time‑wasting app usage, periodically starts an AI conversation, and enforces/records time grants and AI memory.
 - Primary stacks: Kotlin, Jetpack Compose, Android Services/Notifications, Google AI (Gemini) client, Handlebars templates for prompts.
+- Folder "backend" contains the thin cloud server routing the AI calls. NOTE: it is .gitignore-d by the top repo, the folder is its own repo. 
 
 Entrypoint and UI
 - app/src/main/java/com/example/timelinter/MainActivity.kt
@@ -108,7 +109,7 @@ Memory and Settings
     - `getActiveTemporaryGroupsByDate()` returns temporary memories grouped by YYYY‑MM‑DD expiration.
 
 - app/src/main/java/com/example/timelinter/SettingsManager.kt
-  - Reads/writes app settings not covered elsewhere (all Duration-based).
+  - Reads/writes app settings not covered elsewhere.
   - Unified bucket settings:
     - `getMaxOverfill` / `setMaxOverfill` - maximum overfill beyond normal limit (default: 30 min)
     - `getOverfillDecayPerHour` / `setOverfillDecayPerHour` - overfill decay rate (default: 10 min/hr)

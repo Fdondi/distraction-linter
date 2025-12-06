@@ -80,6 +80,12 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.material.icons.extended)
 
+    // Auth & Networking
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+    implementation(libs.okhttp)
+
     // Third party libraries
     implementation(libs.google.ai.client.generativeai)
     implementation("com.github.jknack:handlebars:4.4.0")

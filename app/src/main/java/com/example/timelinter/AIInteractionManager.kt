@@ -3,12 +3,11 @@ package com.example.timelinter
 import android.content.Context
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.GenerateContentResponse
+import com.google.ai.client.generativeai.type.Content
+import com.google.ai.client.generativeai.type.TextPart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.milliseconds
 
 /*
 AI interaction model:
@@ -35,6 +34,12 @@ class AIInteractionManager(
     }
 
     private fun initializeModel(task: AITask = currentTask) {
+        if (SettingsManager.getAIMode(context) != SettingsManager.AI_MODE_DIRECT) {
+            Log.d(tag, "Skipping GenerativeModel initialization (Mode is BACKEND)")
+            currentTask = task
+            return
+        }
+
         val apiKey = ApiKeyManager.getKey(context)
         if (apiKey != null) {
             try {
@@ -48,15 +53,16 @@ class AIInteractionManager(
                 Log.i(tag, "GenerativeModel initialized successfully with model ${modelConfig.modelName} for task ${task.displayName}.")
             } catch (e: Exception) {
                 Log.e(tag, "Error initializing GenerativeModel", e)
-                // Consider how to handle this error - e.g., notify user, disable AI features
             }
         } else {
             Log.e(tag, "API Key not found. GenerativeModel cannot be initialized.")
-            // Handle missing API key - e.g., prompt user in UI
         }
     }
 
-    fun getInitializedModel(task: AITask = currentTask): GenerativeModel? {
+    private fun getInitializedModel(task: AITask = currentTask): GenerativeModel? {
+        if (SettingsManager.getAIMode(context) != SettingsManager.AI_MODE_DIRECT) {
+            return null
+        }
         // Re-initialize if task changed or model is null
         if (generativeModel == null || task != currentTask) {
             Log.w(tag, "getInitializedModel called - reinitializing for task ${task.displayName}.")
@@ -75,148 +81,95 @@ class AIInteractionManager(
         }
     }
 
-    // Generate a response from explicitly provided contents (bypasses pulling from history)
-    fun generateFromContents(
-        contents: List<com.google.ai.client.generativeai.type.Content>,
-        onResponse: (GenerateContentResponse?) -> Unit,
+    /**
+     * Generate response for the current conversation history.
+     * Supports both Direct and Backend modes.
+     */
+    suspend fun generateResponse(task: AITask): ParsedResponse? {
+        val mode = SettingsManager.getAIMode(context)
+        val history = conversationHistoryManager.getHistoryForAPI()
+        
+        if (history.isEmpty()) {
+             Log.e(tag, "History is empty")
+             return null
+        }
+
+        if (mode == SettingsManager.AI_MODE_BACKEND) {
+             val token = ApiKeyManager.getGoogleIdToken(context)
+             if (token.isNullOrEmpty()) {
+                 Log.e(tag, "No Google ID Token found (Backend Mode)")
+                 return ParsedResponse(userMessage = "(Error: Not signed in. Please sign in via Settings.)", tools = emptyList())
+             }
+             
+             // Convert history to prompt
+             val prompt = history.joinToString("\n") { content -> 
+                 val role = if (content.role == "model") "AI" else "User"
+                 val text = content.parts.filterIsInstance<TextPart>()
+                     .joinToString(" ") { it.text }
+                 "$role: $text"
+             }
+
+             val config = AIConfigManager.getModelForTask(context, task)
+             val modelId = config.modelName 
+
+             return try {
+                 val resultText = BackendClient.generate(token, prompt, modelId)
+                 ParsedResponse(userMessage = resultText, tools = emptyList())
+             } catch (e: Exception) {
+                 Log.e(tag, "Backend error", e)
+                 ParsedResponse(userMessage = "(Backend Error: ${e.message})", tools = emptyList())
+             }
+
+        } else {
+             val model = getInitializedModel(task) ?: return ParsedResponse(userMessage = "(Error: AI not initialized)", tools = emptyList())
+             return try {
+                 val response = model.generateContent(*history.toTypedArray())
+                 GeminiFunctionCallParser.parse(response)
+             } catch (e: Exception) {
+                 Log.e(tag, "Direct API error", e)
+                 ParsedResponse(userMessage = "(API Error: ${e.message})", tools = emptyList())
+             }
+        }
+    }
+
+    /**
+     * Generate response from custom contents (used for archiving/summary).
+     */
+    suspend fun generateFromContents(
+        contents: List<Content>,
         task: AITask = currentTask
-    ) {
-        val currentModel = getInitializedModel(task) ?: run {
-            onResponse(null)
-            return
-        }
-        serviceScope.launch {
-            try {
-                val response = currentModel.generateContent(*contents.toTypedArray())
-                onResponse(response)
-            } catch (e: Exception) {
-                Log.e(tag, "Error calling AI API (custom contents)", e)
-                onResponse(null)
-            }
-        }
-    }
+    ): ParsedResponse? {
+         val mode = SettingsManager.getAIMode(context)
+         if (mode == SettingsManager.AI_MODE_BACKEND) {
+             val token = ApiKeyManager.getGoogleIdToken(context)
+             if (token.isNullOrEmpty()) return null
+             
+             val prompt = contents.joinToString("\n") { content -> 
+                 val role = if (content.role == "model") "AI" else "User"
+                 val text = content.parts.filterIsInstance<TextPart>()
+                     .joinToString(" ") { it.text }
+                 "$role: $text"
+             }
+             
+             val config = AIConfigManager.getModelForTask(context, task)
+             val modelId = config.modelName
 
-    fun generateSubsequentResponse(
-        appName: String,
-        sessionTimeMs: Long,
-        dailyTimeMs: Long,
-        onResponse: (String) -> Unit,
-        task: AITask = AITask.FOLLOWUP_NO_RESPONSE
-    ) {
-        val currentModel = getInitializedModel(task) ?: run {
-            Log.e(tag, "generateSubsequentResponse: GenerativeModel not initialized.")
-            onResponse("(Error: AI not ready for subsequent response)")
-            return
-        }
-
-        // Construct a contextual user message for the API.
-        // This message itself should NOT be added to the user-visible chat history.
-        // It's a prompt for the AI based on continued usage.
-        val contextualPromptForAPI = "User is still on $appName. Session time: ${formatDuration(sessionTimeMs)}, Total daily time: ${formatDuration(dailyTimeMs)}. What should I say next?"
-
-        // Add this contextual prompt to the API history ONLY.
-        // TODO: Need a method in ConversationHistoryManager to add to API history without affecting user history.
-        // For now, this will also add to user history, which is not ideal.
-        conversationHistoryManager.addUserMessage(
-            messageText = contextualPromptForAPI, // This will appear in UI, needs fix
-            currentAppName = appName, 
-            sessionTime = sessionTimeMs.milliseconds,
-            dailyTime = dailyTimeMs.milliseconds
-        )
-
-        val apiContents = conversationHistoryManager.getHistoryForAPI()
-        if (apiContents.isEmpty()) {
-            Log.e(tag, "generateSubsequentResponse: API history is empty. Cannot make API call.")
-            onResponse("(Error: AI history empty for subsequent response)")
-            return
-        }
-
-        Log.d(tag, "generateSubsequentResponse: Sending to AI. API History size: ${apiContents.size}")
-
-        serviceScope.launch {
-            var aiResponseText: String? = null
-            var errorMessage: String? = null
-
-            try {
-                val response: GenerateContentResponse = currentModel.generateContent(*apiContents.toTypedArray())
-                aiResponseText = response.text
-                if (aiResponseText == null) {
-                    Log.w(tag, "Gemini response (subsequent) was null text.")
-                    errorMessage = "(AI gave an empty response)"
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "Error calling Gemini API for subsequent response", e)
-                errorMessage = "(API Error: ${e.message})"
-            }
-
-            val messageToSend = aiResponseText ?: errorMessage ?: "(Unknown error from AI)"
-            Log.i(tag, "Processed AI Response (subsequent): $messageToSend")
-            onResponse(messageToSend)
-        }
-    }
-
-    private fun formatDuration(millis: Long): String {
-        val seconds = millis / 1000
-        val minutes = seconds / 60
-        val hours = minutes / 60
-        return when {
-            hours > 0 -> "$hours h ${minutes % 60} min"
-            minutes > 0 -> "$minutes min ${seconds % 60} s"
-            else -> "$seconds s"
-        }
-    }
-
-    fun generateResponse(
-        onResponse: (String) -> Unit,
-        task: AITask = AITask.FIRST_MESSAGE
-    ) {
-        val currentModel = getInitializedModel(task) ?: run {
-            onResponse("(Error: AI not initialized - Model unavailable)")
-            return
-        }
-
-        serviceScope.launch {
-            var aiResponseText: String? = null
-            var errorMessage: String? = null
-            
-            val apiContents = conversationHistoryManager.getHistoryForAPI()
-
-            if (apiContents.isEmpty()) {
-                Log.e(tag, "generateResponse: API history from ConversationHistoryManager is empty. Cannot make API call.")
-                onResponse("(Error: AI Interaction - No content to send)")
-                return@launch
-            }
-            
-            Log.d(tag, "--- AIInteractionManager: Sending to Gemini (History from Manager) ---")
-            apiContents.forEachIndexed { idx, content ->
-                 val textPreview = content.parts.joinToString { part ->
-                    if (part is com.google.ai.client.generativeai.type.TextPart) {
-                        part.text.take(70).replace("", " ")
-                    } else {
-                        part.toString().take(70)
-                    }
-                }.let { if (it.length > 70) it.substring(0, 70) + "..." else it }
-                Log.d(tag, "APIContent[$idx]: role=${content.role}, text='$textPreview'")
-            }
-            Log.d(tag, "--- End of AIInteractionManager: API Request Contents ---")
-
-            try {
-                val response = currentModel.generateContent(*apiContents.toTypedArray())
-                aiResponseText = response.text
-                Log.d(tag, "Raw Gemini Response: $aiResponseText")
-
-                if (aiResponseText == null) {
-                    Log.w(tag, "Gemini response was null.")
-                    errorMessage = "(Error getting AI response: Null text)"
-                }
-
-            } catch (e: Exception) {
-                Log.e(tag, "Error calling Gemini API", e)
-                errorMessage = "(API Error: ${e.message})"
-            }
-
-            val result = aiResponseText ?: errorMessage ?: "(Unknown Error obtaining AI response)"
-            onResponse(result)
-        }
+             return try {
+                 val resultText = BackendClient.generate(token, prompt, modelId)
+                 ParsedResponse(userMessage = resultText, tools = emptyList())
+             } catch (e: Exception) {
+                 Log.e(tag, "Backend error (custom contents)", e)
+                 null
+             }
+         } else {
+             val model = getInitializedModel(task) ?: return null
+             return try {
+                 val response = model.generateContent(*contents.toTypedArray())
+                 GeminiFunctionCallParser.parse(response)
+             } catch (e: Exception) {
+                 Log.e(tag, "Direct API error (custom contents)", e)
+                 null
+             }
+         }
     }
 }

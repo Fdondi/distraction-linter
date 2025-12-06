@@ -40,8 +40,21 @@ object SettingsManager {
     private const val DEFAULT_GOOD_APP_FILL_RATE_MULTIPLIER = 2
     private const val DEFAULT_NEUTRAL_APP_FILL_RATE_MULTIPLIER = 1
 
+    // AI Mode
+    private const val AI_MODE_KEY = "ai_mode"
+    const val AI_MODE_DIRECT = "direct"
+    const val AI_MODE_BACKEND = "backend"
+
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    }
+
+    fun getAIMode(context: Context): String {
+        return getPreferences(context).getString(AI_MODE_KEY, AI_MODE_DIRECT) ?: AI_MODE_DIRECT
+    }
+
+    fun setAIMode(context: Context, mode: String) {
+        getPreferences(context).edit { putString(AI_MODE_KEY, mode) }
     }
 
     fun getObserveTimer(context: Context): Duration {

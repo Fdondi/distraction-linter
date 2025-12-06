@@ -17,6 +17,7 @@ object ApiKeyManager {
 
     private const val PREFERENCE_FILE_KEY = "com.example.timelinter.encrypted_prefs"
     private const val API_KEY_PREF = "gemini_api_key"
+    private const val GOOGLE_ID_TOKEN_PREF = "google_id_token"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
     private const val USER_NOTES_PREF = "user_notes"
     private const val COACH_NAME_PREF = "coach_name"
@@ -41,6 +42,16 @@ object ApiKeyManager {
         val key = getEncryptedString(context, API_KEY_PREF, null)
         Log.d(TAG, "API Key loaded: ${if (key.isNullOrEmpty()) "Not Found" else "Found"}")
         return key
+    }
+
+    fun saveGoogleIdToken(context: Context, token: String) {
+        if (token.isBlank()) return
+        putEncryptedString(context, GOOGLE_ID_TOKEN_PREF, token)
+        Log.i(TAG, "Google ID Token saved successfully.")
+    }
+
+    fun getGoogleIdToken(context: Context): String? {
+        return getEncryptedString(context, GOOGLE_ID_TOKEN_PREF, null)
     }
 
     fun hasKey(context: Context): Boolean {

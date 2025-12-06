@@ -45,6 +45,11 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import kotlinx.coroutines.launch
+
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit
@@ -169,6 +174,11 @@ fun SettingsScreen(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     text = { Text("Timers") }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("AI") }
                 )
             }
 
@@ -464,6 +474,95 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+                    }
+                }
+                2 -> {
+                    // AI Settings
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        var aiMode by remember { mutableStateOf(SettingsManager.getAIMode(context)) }
+                        var apiKey by remember { mutableStateOf(ApiKeyManager.getKey(context) ?: "") }
+                        var isSignedIn by remember { mutableStateOf(!ApiKeyManager.getGoogleIdToken(context).isNullOrEmpty()) }
+                        val coroutineScope = rememberCoroutineScope()
+
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("AI Mode", style = MaterialTheme.typography.titleMedium)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(
+                                        selected = aiMode == SettingsManager.AI_MODE_DIRECT,
+                                        onClick = { 
+                                            aiMode = SettingsManager.AI_MODE_DIRECT
+                                            SettingsManager.setAIMode(context, aiMode)
+                                        }
+                                    )
+                                    Text("Direct (API Key)")
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(
+                                        selected = aiMode == SettingsManager.AI_MODE_BACKEND,
+                                        onClick = { 
+                                            aiMode = SettingsManager.AI_MODE_BACKEND
+                                            SettingsManager.setAIMode(context, aiMode)
+                                        }
+                                    )
+                                    Text("Subscription (Backend)")
+                                }
+                            }
+                        }
+
+                        if (aiMode == SettingsManager.AI_MODE_DIRECT) {
+                             OutlinedTextField(
+                                 value = apiKey,
+                                 onValueChange = { 
+                                     apiKey = it
+                                     ApiKeyManager.saveKey(context, it)
+                                 },
+                                 label = { Text("Gemini API Key") },
+                                 modifier = Modifier.fillMaxWidth(),
+                                 visualTransformation = PasswordVisualTransformation()
+                             )
+                             Text(
+                                 text = "Get your API key from Google AI Studio",
+                                 style = MaterialTheme.typography.bodySmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                             )
+                        } else {
+                             Card(modifier = Modifier.fillMaxWidth()) {
+                                 Column(modifier = Modifier.padding(16.dp)) {
+                                     Text("Subscription Status", style = MaterialTheme.typography.titleMedium)
+                                     Spacer(modifier = Modifier.height(8.dp))
+                                     
+                                     if (isSignedIn) {
+                                         Text("✅ Signed in with Google", color = MaterialTheme.colorScheme.primary)
+                                         Spacer(modifier = Modifier.height(8.dp))
+                                         Text(
+                                             text = "The app will use your subscription to access AI features.",
+                                             style = MaterialTheme.typography.bodySmall
+                                         )
+                                     } else {
+                                         Text("Not signed in", color = MaterialTheme.colorScheme.error)
+                                         Spacer(modifier = Modifier.height(16.dp))
+                                         Button(onClick = {
+                                             coroutineScope.launch {
+                                                 val token = AuthManager.signIn(context)
+                                                 if (token != null) {
+                                                     isSignedIn = true
+                                                 }
+                                             }
+                                         }) {
+                                             Text("Sign in with Google")
+                                         }
+                                     }
+                                 }
+                             }
                         }
                     }
                 }

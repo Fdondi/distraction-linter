@@ -21,3 +21,6 @@ local.properties
 
 # AI scratchpad
 app/docs/
+
+# managed in a separate repo
+backend/
