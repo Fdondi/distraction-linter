@@ -25,11 +25,11 @@ fun getApiKey(propertyKey: String): String {
 }
 
 android {
-    namespace = "com.example.timelinter"
+    namespace = "com.timelinter.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.timelinter"
+        applicationId = "com.timelinter.app"
         minSdk = 30
         targetSdk = 36
         versionCode = 1
