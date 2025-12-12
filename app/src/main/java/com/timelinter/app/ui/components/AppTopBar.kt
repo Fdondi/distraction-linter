@@ -2,15 +2,14 @@ package com.timelinter.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Cloud
@@ -42,18 +41,19 @@ fun AppTopBar(
     actions: (@Composable RowScope.() -> Unit)? = null
 ) {
     Surface(tonalElevation = 2.dp) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .fillMaxWidth()
+                    .height(48.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(modifier = Modifier.width(48.dp)) {
+                Box(modifier = Modifier.width(48.dp).fillMaxHeight()) {
                     navigationIcon?.let { icon ->
                         Row(
                             modifier = Modifier.fillMaxHeight(),
@@ -68,11 +68,16 @@ fun AppTopBar(
                     Text(text = title, style = MaterialTheme.typography.titleLarge)
                 }
 
+                // Reserve space symmetrical to navigation area
+                Box(modifier = Modifier.width(48.dp))
+            }
+
+            actions?.let {
                 Row(
-                    modifier = Modifier.widthIn(min = 48.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                    content = { actions?.invoke(this) }
+                    content = it
                 )
             }
         }
