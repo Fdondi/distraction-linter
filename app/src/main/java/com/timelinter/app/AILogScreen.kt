@@ -53,11 +53,14 @@ import java.util.Locale
 import kotlin.time.ExperimentalTime
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import com.timelinter.app.ui.components.NavigationActions
+import com.timelinter.app.ui.components.TopNavigationMenu
 
 @OptIn(ExperimentalTime::class)
 @Composable
 fun AILogScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions
 ) {
     val events by EventLogStore.events.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
@@ -119,7 +122,8 @@ fun AILogScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                actions = { TopNavigationMenu(navigationActions) }
             )
         }
     ) { padding ->

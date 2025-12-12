@@ -186,6 +186,54 @@ class EdgeToEdgeLayoutTest {
     }
 
     @Test
+    fun topMenuAvailableAcrossScreens() {
+        composeTestRule.waitForIdle()
+
+        // Open Good Apps from the top menu
+        composeTestRule.onNodeWithContentDescription("Good Apps").performClick()
+        composeTestRule.waitForIdle()
+
+        // Menu icons should still be visible on the Good Apps screen
+        listOf(
+            "Wasteful Apps",
+            "Good Apps",
+            "Timer Settings",
+            "AI Log",
+            "AI Configuration"
+        ).forEach { description ->
+            composeTestRule.onNodeWithContentDescription(description).assertExists()
+        }
+
+        // Jump directly to AI Log without going back
+        composeTestRule.onNodeWithContentDescription("AI Log").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("AI Memory").assertExists()
+        listOf(
+            "Wasteful Apps",
+            "Good Apps",
+            "Timer Settings",
+            "AI Log",
+            "AI Configuration"
+        ).forEach { description ->
+            composeTestRule.onNodeWithContentDescription(description).assertExists()
+        }
+
+        // Jump directly to Timer Settings from AI Log
+        composeTestRule.onNodeWithContentDescription("Timer Settings").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Observe Timer").assertExists()
+        listOf(
+            "Wasteful Apps",
+            "Good Apps",
+            "Timer Settings",
+            "AI Log",
+            "AI Configuration"
+        ).forEach { description ->
+            composeTestRule.onNodeWithContentDescription(description).assertExists()
+        }
+    }
+
+    @Test
     fun testMultipleScreensHaveProperInsets() {
         composeTestRule.waitForIdle()
 

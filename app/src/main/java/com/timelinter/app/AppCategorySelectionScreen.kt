@@ -20,11 +20,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.time.Duration.Companion.minutes
+import com.timelinter.app.ui.components.AppTopBar
+import com.timelinter.app.ui.components.NavigationActions
+import com.timelinter.app.ui.components.TopNavigationMenu
 
 /**
  * Generic screen for managing app categories (good apps, bad apps, etc.)
  */
-@OptIn(ExperimentalMaterial3Api::class) // Add this line
 @Composable
 fun AppCategorySelectionScreen(
     title: String,
@@ -33,7 +35,8 @@ fun AppCategorySelectionScreen(
     explanationPlaceholder: String,
     manager: AppCategoryManager,
     showFreeAllowance: Boolean = false,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions
 ) {
     val context = LocalContext.current
 
@@ -151,13 +154,14 @@ fun AppCategorySelectionScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(title) },
+            AppTopBar(
+                title = title,
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
-                }
+                },
+                actions = { TopNavigationMenu(navigationActions) }
             )
         }
     ) { paddingValues ->
@@ -362,7 +366,7 @@ private fun AppCategoryListItem(
 
 // Convenience wrappers for backward compatibility
 @Composable
-fun AppSelectionScreen(onNavigateBack: () -> Unit) {
+fun AppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: NavigationActions) {
     AppCategorySelectionScreen(
         title = "Time-Wasting Apps",
         selectedSectionLabel = "Selected Time-Wasting Apps",
@@ -370,19 +374,21 @@ fun AppSelectionScreen(onNavigateBack: () -> Unit) {
         explanationPlaceholder = "e.g., Too distracting, wastes time, addiction...",
         manager = AppCategoryManager("time_waster_apps", "TimeWasterAppManager"),
         showFreeAllowance = true,
-        onNavigateBack = onNavigateBack
+        onNavigateBack = onNavigateBack,
+        navigationActions = navigationActions
     )
 }
 
 @Composable
-fun GoodAppSelectionScreen(onNavigateBack: () -> Unit) {
+fun GoodAppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: NavigationActions) {
     AppCategorySelectionScreen(
         title = "Good Apps",
         selectedSectionLabel = "Selected Good Apps",
         explanationLabel = "Why is this a good app?",
         explanationPlaceholder = "e.g., Helps with productivity, learning, exercise...",
         manager = AppCategoryManager("good_apps", "GoodAppManager"),
-        onNavigateBack = onNavigateBack
+        onNavigateBack = onNavigateBack,
+        navigationActions = navigationActions
     )
 }
 

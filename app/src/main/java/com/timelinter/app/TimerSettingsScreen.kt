@@ -31,13 +31,16 @@ import androidx.compose.ui.unit.dp
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import com.timelinter.app.ui.components.NavigationActions
+import com.timelinter.app.ui.components.TopNavigationMenu
 
 /**
  * Dedicated screen for configuring all timer-related settings. Extracted from the old SettingsScreen.
  */
 @Composable
 fun TimerSettingsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions
 ) {
     val context = LocalContext.current
 
@@ -74,7 +77,8 @@ fun TimerSettingsScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                actions = { TopNavigationMenu(navigationActions) }
             )
         }
     ) { padding ->

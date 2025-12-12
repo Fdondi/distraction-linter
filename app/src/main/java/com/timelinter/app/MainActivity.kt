@@ -66,6 +66,8 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.timelinter.app.ui.components.AppTopBar
+import com.timelinter.app.ui.components.NavigationActions
+import com.timelinter.app.ui.components.TopNavigationMenu
 import com.timelinter.app.ui.components.ScrollableTextFieldWithScrollbar
 import kotlinx.coroutines.launch
 
@@ -162,100 +164,136 @@ class MainActivity : ComponentActivity() {
                 }
 
                 var showTutorialScreen by remember { mutableStateOf(isFirstBoot) }
-                var showAppsScreen by remember { mutableStateOf(false) }
-                var showGoodAppsScreen by remember { mutableStateOf(false) }
-                var showTimerScreen by remember { mutableStateOf(false) }
-                var showLogScreen by remember { mutableStateOf(false) }
-                var showAIConfigScreen by remember { mutableStateOf(false) }
+                var activeScreen by rememberSaveable { mutableStateOf(MainScreen.Home) }
+
+                val navigationActions =
+                        NavigationActions(
+                                onOpenApps = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.WastefulApps
+                                },
+                                onOpenGoodApps = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.GoodApps
+                                },
+                                onOpenTimers = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.TimerSettings
+                                },
+                                onOpenLog = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.AILog
+                                },
+                                onOpenAIConfig = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.AIConfig
+                                }
+                        )
 
                 if (showTutorialScreen) {
                     FirstBootTutorialScreen(
                             onNavigateToAppSelection = {
                                 showTutorialScreen = false
-                                showAppsScreen = true
+                                activeScreen = MainScreen.WastefulApps
                             },
                             onSkip = {
                                 ApiKeyManager.setFirstBootTutorialShown(context)
                                 showTutorialScreen = false
                             }
                     )
-                } else if (showAppsScreen) {
-                    AppSelectionScreen(
-                            onNavigateBack = {
-                                showAppsScreen = false
-                                // After selecting apps, mark tutorial as shown
-                                ApiKeyManager.setFirstBootTutorialShown(context)
-                            }
-                    )
-                } else if (showGoodAppsScreen) {
-                    GoodAppSelectionScreen(onNavigateBack = { showGoodAppsScreen = false })
-                } else if (showTimerScreen) {
-                    TimerSettingsScreen(onNavigateBack = { showTimerScreen = false })
-                } else if (showLogScreen) {
-                    AILogScreen(onNavigateBack = { showLogScreen = false })
-                } else if (showAIConfigScreen) {
-                    Scaffold(
-                            topBar = {
-                                AppTopBar(
-                                        title = "AI Configuration",
-                                        navigationIcon = {
-                                            IconButton(onClick = { showAIConfigScreen = false }) {
-                                                Icon(
-                                                        Icons.AutoMirrored.Filled.ArrowBack,
-                                                        contentDescription = "Back"
-                                                )
-                                            }
+                } else {
+                    when (activeScreen) {
+                        MainScreen.Home ->
+                                TimeLinterApp(
+                                        isMonitoring = isMonitoringActive,
+                                        aiMode = aiMode,
+                                        hasBackendToken = hasBackendToken,
+                                        isSigningIn = isSigningIn,
+                                        onToggleMonitoring = { attemptStartMonitoring() },
+                                        showUsageAccessDialog = showUsageAccessDialog,
+                                        onDismissUsageAccessDialog = { showUsageAccessDialog = false },
+                                        onGoToUsageAccessSettings = { openUsageAccessSettings() },
+                                        showNotificationPermissionRationale =
+                                                showNotificationPermissionRationale,
+                                        onDismissNotificationPermissionRationale = {
+                                            showNotificationPermissionRationale = false
+                                        },
+                                        onRequestNotificationPermissionAgain = {
+                                            requestNotificationPermission()
+                                        },
+                                        apiKeyPresent = apiKeyPresent,
+                                        onGoogleSignIn = { triggerGoogleSignIn() },
+                                        onGoogleSignOut = { clearGoogleSignIn() },
+                                        onSaveApiKey = {
+                                            ApiKeyManager.saveKey(this, it)
+                                            apiKeyPresent = ApiKeyManager.hasKey(this)
+                                        },
+                                        showHeadsUpInfoDialog = showHeadsUpInfoDialog,
+                                        onDismissHeadsUpInfoDialog = {
+                                            showHeadsUpInfoDialog = false
+                                            startMonitoringServiceIfPermitted()
+                                        },
+                                        onGoToChannelSettings = { openNotificationChannelSettings() },
+                                        navigationActions = navigationActions,
+                                        userNotes = userNotes,
+                                        onSaveUserNotes = {
+                                            ApiKeyManager.saveUserNotes(this, it)
+                                            userNotes = it
+                                        },
+                                        coachName = coachName,
+                                        onSaveCoachName = {
+                                            ApiKeyManager.saveCoachName(this, it)
+                                            coachName = it
                                         }
                                 )
-                            }
-                    ) { padding -> Box(modifier = Modifier.padding(padding)) { AIConfigScreen() } }
-                } else {
-                    TimeLinterApp(
-                            isMonitoring = isMonitoringActive,
-                            aiMode = aiMode,
-                            hasBackendToken = hasBackendToken,
-                            isSigningIn = isSigningIn,
-                            onToggleMonitoring = { attemptStartMonitoring() },
-                            showUsageAccessDialog = showUsageAccessDialog,
-                            onDismissUsageAccessDialog = { showUsageAccessDialog = false },
-                            onGoToUsageAccessSettings = { openUsageAccessSettings() },
-                            showNotificationPermissionRationale =
-                                    showNotificationPermissionRationale,
-                            onDismissNotificationPermissionRationale = {
-                                showNotificationPermissionRationale = false
-                            },
-                            onRequestNotificationPermissionAgain = {
-                                requestNotificationPermission()
-                            },
-                            apiKeyPresent = apiKeyPresent,
-                            onGoogleSignIn = { triggerGoogleSignIn() },
-                            onGoogleSignOut = { clearGoogleSignIn() },
-                            onSaveApiKey = {
-                                ApiKeyManager.saveKey(this, it)
-                                apiKeyPresent = ApiKeyManager.hasKey(this)
-                            },
-                            showHeadsUpInfoDialog = showHeadsUpInfoDialog,
-                            onDismissHeadsUpInfoDialog = {
-                                showHeadsUpInfoDialog = false
-                                startMonitoringServiceIfPermitted()
-                            },
-                            onGoToChannelSettings = { openNotificationChannelSettings() },
-                            onOpenApps = { showAppsScreen = true },
-                            onOpenGoodApps = { showGoodAppsScreen = true },
-                            onOpenTimers = { showTimerScreen = true },
-                            onOpenLog = { showLogScreen = true },
-                            onOpenAIConfig = { showAIConfigScreen = true },
-                            userNotes = userNotes,
-                            onSaveUserNotes = {
-                                ApiKeyManager.saveUserNotes(this, it)
-                                userNotes = it
-                            },
-                            coachName = coachName,
-                            onSaveCoachName = {
-                                ApiKeyManager.saveCoachName(this, it)
-                                coachName = it
-                            }
-                    )
+                        MainScreen.WastefulApps ->
+                                AppSelectionScreen(
+                                        navigationActions = navigationActions,
+                                        onNavigateBack = {
+                                            ApiKeyManager.setFirstBootTutorialShown(context)
+                                            activeScreen = MainScreen.Home
+                                        }
+                                )
+                        MainScreen.GoodApps ->
+                                GoodAppSelectionScreen(
+                                        navigationActions = navigationActions,
+                                        onNavigateBack = { activeScreen = MainScreen.Home }
+                                )
+                        MainScreen.TimerSettings ->
+                                TimerSettingsScreen(
+                                        navigationActions = navigationActions,
+                                        onNavigateBack = { activeScreen = MainScreen.Home }
+                                )
+                        MainScreen.AILog ->
+                                AILogScreen(
+                                        navigationActions = navigationActions,
+                                        onNavigateBack = { activeScreen = MainScreen.Home }
+                                )
+                        MainScreen.AIConfig ->
+                                Scaffold(
+                                        topBar = {
+                                            AppTopBar(
+                                                    title = "AI Configuration",
+                                                    navigationIcon = {
+                                                        IconButton(
+                                                                onClick = {
+                                                                    activeScreen =
+                                                                            MainScreen.Home
+                                                                }
+                                                        ) {
+                                                            Icon(
+                                                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                                                    contentDescription = "Back"
+                                                            )
+                                                        }
+                                                    },
+                                                    actions = { TopNavigationMenu(navigationActions) }
+                                            )
+                                        }
+                                ) { padding ->
+                                    Box(modifier = Modifier.padding(padding)) { AIConfigScreen() }
+                                }
+                    }
                 }
             }
         }
@@ -471,6 +509,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class MainScreen {
+    Home,
+    WastefulApps,
+    GoodApps,
+    TimerSettings,
+    AILog,
+    AIConfig
+}
+
 @Composable
 fun TimeLinterApp(
         isMonitoring: Boolean,
@@ -491,11 +538,7 @@ fun TimeLinterApp(
         showHeadsUpInfoDialog: Boolean,
         onDismissHeadsUpInfoDialog: () -> Unit,
         onGoToChannelSettings: () -> Unit,
-        onOpenApps: () -> Unit,
-        onOpenGoodApps: () -> Unit,
-        onOpenTimers: () -> Unit,
-        onOpenLog: () -> Unit,
-        onOpenAIConfig: () -> Unit,
+        navigationActions: NavigationActions,
         userNotes: String,
         onSaveUserNotes: (String) -> Unit,
         coachName: String,
@@ -519,26 +562,7 @@ fun TimeLinterApp(
             topBar = {
                 AppTopBar(
                         title = stringResource(id = R.string.app_name),
-                        actions = {
-                            IconButton(onClick = onOpenApps) {
-                                Icon(
-                                        Icons.AutoMirrored.Filled.List,
-                                        contentDescription = "Wasteful Apps"
-                                )
-                            }
-                            IconButton(onClick = onOpenGoodApps) {
-                                Icon(Icons.Default.Hexagon, contentDescription = "Good Apps")
-                            }
-                            IconButton(onClick = onOpenTimers) {
-                                Icon(Icons.Default.Timer, contentDescription = "Timer Settings")
-                            }
-                            IconButton(onClick = onOpenLog) {
-                                Icon(Icons.Default.History, contentDescription = "AI Log")
-                            }
-                            IconButton(onClick = onOpenAIConfig) {
-                                Icon(Icons.Default.Cloud, contentDescription = "AI Configuration")
-                            }
-                        }
+                        actions = { TopNavigationMenu(navigationActions) }
                 )
             }
     ) { padding ->
