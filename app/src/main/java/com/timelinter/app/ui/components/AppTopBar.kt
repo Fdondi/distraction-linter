@@ -27,8 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 data class NavigationActions(
-    val onOpenApps: () -> Unit,
-    val onOpenGoodApps: () -> Unit,
+    val onOpenCategories: () -> Unit,
     val onOpenTimers: () -> Unit,
     val onOpenLog: () -> Unit,
     val onOpenAIConfig: () -> Unit
@@ -86,11 +85,8 @@ fun AppTopBar(
 
 @Composable
 fun TopNavigationMenu(actions: NavigationActions) {
-    IconButton(onClick = actions.onOpenApps) {
-        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Wasteful Apps")
-    }
-    IconButton(onClick = actions.onOpenGoodApps) {
-        Icon(Icons.Default.Hexagon, contentDescription = "Good Apps")
+    IconButton(onClick = actions.onOpenCategories) {
+        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "App Categories")
     }
     IconButton(onClick = actions.onOpenTimers) {
         Icon(Icons.Default.Timer, contentDescription = "Timer Settings")

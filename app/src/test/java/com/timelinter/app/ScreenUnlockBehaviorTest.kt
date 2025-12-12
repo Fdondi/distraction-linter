@@ -12,6 +12,24 @@ import kotlin.time.Instant
 class ScreenUnlockBehaviorTest {
 
     private lateinit var context: Context
+    private val neutralCategory = ResolvedCategory(
+        id = AppCategoryIds.DEFAULT,
+        label = "Default",
+        minutesChangePerMinute = null,
+        freeMinutesPerPeriod = 0,
+        freePeriodsPerDay = 0,
+        allowOverfill = false,
+        usesNeutralTimers = true
+    )
+    private val wastefulCategory = ResolvedCategory(
+        id = AppCategoryIds.BAD,
+        label = "Bad",
+        minutesChangePerMinute = -1f,
+        freeMinutesPerPeriod = 0,
+        freePeriodsPerDay = 0,
+        allowOverfill = false,
+        usesNeutralTimers = false
+    )
 
     private class FakeTimeProvider(start: Instant = Instant.fromEpochMilliseconds(0)) : TimeProvider {
         private var now: Instant = start
@@ -41,9 +59,9 @@ class ScreenUnlockBehaviorTest {
         val time = FakeTimeProvider()
         val bucket = TokenBucket(context, time)
 
-        bucket.update(AppState.NEUTRAL)
+        bucket.update(neutralCategory)
         time.advanceMinutes(120)
-        val remaining = bucket.update(AppState.NEUTRAL)
+        val remaining = bucket.update(neutralCategory)
 
         assertEquals(SettingsManager.getMaxThreshold(context), remaining)
     }
@@ -54,9 +72,9 @@ class ScreenUnlockBehaviorTest {
         val time = FakeTimeProvider()
         val bucket = TokenBucket(context, time)
 
-        bucket.update(AppState.NEUTRAL)
+        bucket.update(neutralCategory)
         time.advanceMinutes(20)
-        val remaining = bucket.update(AppState.NEUTRAL)
+        val remaining = bucket.update(neutralCategory)
 
         assertTrue("Remaining time should increase after neutral period", remaining > 5.minutes)
     }
@@ -67,12 +85,12 @@ class ScreenUnlockBehaviorTest {
         val time = FakeTimeProvider()
         val bucket = TokenBucket(context, time)
 
-        bucket.update(AppState.NEUTRAL)
+        bucket.update(neutralCategory)
         time.advanceMinutes(15)
-        val afterNeutral = bucket.update(AppState.NEUTRAL)
+        val afterNeutral = bucket.update(neutralCategory)
 
         val beforeWasteful = afterNeutral
-        val wastefulRemaining = bucket.update(AppState.WASTEFUL)
+        val wastefulRemaining = bucket.update(wastefulCategory)
         assertTrue("Wasteful app should reduce remaining time", wastefulRemaining <= beforeWasteful)
     }
 }

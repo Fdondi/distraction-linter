@@ -30,9 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Hexagon
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
@@ -69,6 +67,7 @@ import com.timelinter.app.ui.components.AppTopBar
 import com.timelinter.app.ui.components.NavigationActions
 import com.timelinter.app.ui.components.TopNavigationMenu
 import com.timelinter.app.ui.components.ScrollableTextFieldWithScrollbar
+import com.timelinter.app.AppCategoriesScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -158,9 +157,9 @@ class MainActivity : ComponentActivity() {
 
                 // Check if this is first boot (no apps selected and tutorial not shown)
                 val isFirstBoot = remember {
-                    val selectedApps = TimeWasterAppManager.getSelectedApps(context)
+                    val assigned = AppCategoryConfigManager(context).getAppAssignments()
                     val tutorialShown = ApiKeyManager.hasFirstBootTutorialBeenShown(context)
-                    selectedApps.isEmpty() && !tutorialShown
+                    assigned.isEmpty() && !tutorialShown
                 }
 
                 var showTutorialScreen by remember { mutableStateOf(isFirstBoot) }
@@ -168,13 +167,9 @@ class MainActivity : ComponentActivity() {
 
                 val navigationActions =
                         NavigationActions(
-                                onOpenApps = {
+                                onOpenCategories = {
                                     ApiKeyManager.setFirstBootTutorialShown(context)
-                                    activeScreen = MainScreen.WastefulApps
-                                },
-                                onOpenGoodApps = {
-                                    ApiKeyManager.setFirstBootTutorialShown(context)
-                                    activeScreen = MainScreen.GoodApps
+                                    activeScreen = MainScreen.AppCategories
                                 },
                                 onOpenTimers = {
                                     ApiKeyManager.setFirstBootTutorialShown(context)
@@ -194,7 +189,7 @@ class MainActivity : ComponentActivity() {
                     FirstBootTutorialScreen(
                             onNavigateToAppSelection = {
                                 showTutorialScreen = false
-                                activeScreen = MainScreen.WastefulApps
+                                activeScreen = MainScreen.AppCategories
                             },
                             onSkip = {
                                 ApiKeyManager.setFirstBootTutorialShown(context)
@@ -246,18 +241,10 @@ class MainActivity : ComponentActivity() {
                                             coachName = it
                                         }
                                 )
-                        MainScreen.WastefulApps ->
-                                AppSelectionScreen(
-                                        navigationActions = navigationActions,
-                                        onNavigateBack = {
-                                            ApiKeyManager.setFirstBootTutorialShown(context)
-                                            activeScreen = MainScreen.Home
-                                        }
-                                )
-                        MainScreen.GoodApps ->
-                                GoodAppSelectionScreen(
-                                        navigationActions = navigationActions,
-                                        onNavigateBack = { activeScreen = MainScreen.Home }
+                        MainScreen.AppCategories ->
+                                AppCategoriesScreen(
+                                    navigationActions = navigationActions,
+                                    onNavigateBack = { activeScreen = MainScreen.Home }
                                 )
                         MainScreen.TimerSettings ->
                                 TimerSettingsScreen(
@@ -511,8 +498,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class MainScreen {
     Home,
-    WastefulApps,
-    GoodApps,
+    AppCategories,
     TimerSettings,
     AILog,
     AIConfig

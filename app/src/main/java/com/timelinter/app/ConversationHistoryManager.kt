@@ -153,40 +153,40 @@ class APIConversationHistory(
             "Currently on $appName"
         }
         
-        // Format good apps info for automated data
-        val appNames = GoodAppManager.getSelectedAppDisplayNames(context)
-        val goodAppExplanations = GoodAppManager.getAllExplanations(context)
-        val badAppExplanations = TimeWasterAppManager.getAllExplanations(context)
-        
+        val categoryManager = AppCategoryConfigManager(context)
+        val assignments = categoryManager.getAppAssignments()
+        val explanations = categoryManager.getAllExplanations()
+        val resolvedAssignments = assignments.mapValues { (pkg, _) -> categoryManager.resolveCategory(pkg) }
+
+        val rewardingEntries = resolvedAssignments.filter { it.value.minutesChangePerMinute?.let { rate -> rate > 0f } == true }
+        val drainingEntries = resolvedAssignments.filter { it.value.minutesChangePerMinute?.let { rate -> rate < 0f } == true }
+
         val goodAppsInfo = buildString {
-            if (appNames != null && appNames.isNotEmpty()) {
-                appendLine("Good apps to suggest instead of wasteful ones:")
-                appNames.forEach { appName ->
-                    val explanation = goodAppExplanations[appName]
-                    if (explanation != null && explanation.isNotEmpty()) {
-                        appendLine("  - $appName: $explanation")
-                    } else {
-                        appendLine("  - $appName")
+            if (rewardingEntries.isNotEmpty()) {
+                appendLine("Rewarding apps to suggest:")
+                rewardingEntries.entries.sortedBy { packageDisplayName(it.key) }.forEach { (pkg, category) ->
+                    val name = packageDisplayName(pkg)
+                    val explanation = explanations[pkg]
+                    append("  - $name [${category.label}]")
+                    if (!explanation.isNullOrBlank()) {
+                        append(": $explanation")
                     }
+                    appendLine()
                 }
             }
         }
-        
+
         val badAppsInfo = buildString {
-            if (badAppExplanations.isNotEmpty()) {
+            if (drainingEntries.isNotEmpty()) {
                 appendLine("Why these apps are considered wasteful:")
-                badAppExplanations.forEach { (pkg, explanation) ->
-                    if (explanation.isNotEmpty()) {
-                        // Try to get app name from package manager
-                        val displayName = try {
-                            context.packageManager.getApplicationLabel(
-                                context.packageManager.getApplicationInfo(pkg, 0)
-                            ).toString()
-                        } catch (e: Exception) {
-                            pkg
-                        }
-                        appendLine("  - $displayName: $explanation")
+                drainingEntries.entries.sortedBy { packageDisplayName(it.key) }.forEach { (pkg, category) ->
+                    val name = packageDisplayName(pkg)
+                    val explanation = explanations[pkg]
+                    append("  - $name [${category.label}]")
+                    if (!explanation.isNullOrBlank()) {
+                        append(": $explanation")
                     }
+                    appendLine()
                 }
             }
         }
@@ -212,6 +212,16 @@ class APIConversationHistory(
         Log.d(TAG, "Added decorated user status: $decoratedUserStatus")
         
         logHistory()
+    }
+
+    private fun packageDisplayName(packageName: String): String {
+        return try {
+            context.packageManager.getApplicationLabel(
+                context.packageManager.getApplicationInfo(packageName, 0)
+            ).toString()
+        } catch (e: Exception) {
+            packageName.substringAfterLast('.')
+        }
     }
 
     fun clear() {

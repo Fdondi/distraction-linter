@@ -67,7 +67,6 @@ fun TimerSettingsScreen(
     // Good Apps settings
     var maxOverfill by remember { mutableStateOf(SettingsManager.getMaxOverfill(context)) }
     var overfillDecayPerHour by remember { mutableStateOf(SettingsManager.getOverfillDecayPerHour(context)) }
-    var goodAppFillRateMultiplier by remember { mutableStateOf(SettingsManager.getGoodAppFillRateMultiplier(context)) }
 
     Scaffold(
         topBar = {
@@ -154,20 +153,6 @@ fun TimerSettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            // Good App Fill Rate Multiplier
-            LinearFloatCard(
-                title = "Good App Fill Rate",
-                description = "How much faster good apps fill your bucket (e.g., 2.0 = twice as fast)",
-                valueText = "${"%.1f".format(goodAppFillRateMultiplier)}x",
-                value = goodAppFillRateMultiplier,
-                valueRange = 0f..10f,
-                steps = 45,
-                onValueChange = { value ->
-                    goodAppFillRateMultiplier = value
-                    SettingsManager.setGoodAppFillRateMultiplier(context, goodAppFillRateMultiplier)
-                }
-            )
-
             // Max Overfill
             LinearDurationCard(
                 title = "Max Overfill",
@@ -206,10 +191,9 @@ fun TimerSettingsScreen(
                                 "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)." +
                                 "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps." +
                                 " Unified Bucket System:" +
-                                "• Good App Fill Rate: How much faster good apps fill your bucket (can exceed normal limit)." +
                                 "• Neutral App Fill Rate: How fast neutral apps fill your bucket." +
                                 "• Max Overfill: Maximum extra time you can store beyond your normal limit." +
-                                "• Decay Rate: How fast overfill decays when not using good apps.",
+                                "• Decay Rate: How fast overfill decays when not using rewarding apps.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

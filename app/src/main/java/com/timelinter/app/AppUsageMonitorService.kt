@@ -31,12 +31,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.util.Calendar
 import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-import java.time.ZoneId
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.DurationUnit
@@ -105,14 +103,48 @@ class AppUsageMonitorService : Service() {
     private var sessionWastedTime: Duration = Duration.ZERO
     private var dailyWastedTime: Duration = Duration.ZERO
     private var currentApp: String = ""
+    private var currentCategory: ResolvedCategory = ResolvedCategory(
+        id = AppCategoryIds.DEFAULT,
+        label = "Default",
+        minutesChangePerMinute = null,
+        freeMinutesPerPeriod = 0,
+        freePeriodsPerDay = 0,
+        allowOverfill = false,
+        usesNeutralTimers = true
+    )
     private var lastAppChangeTime: Instant = timeProvider.now()
     private var currentAppSessionStart: Instant = timeProvider.now() // Track when current app session started
-    private val freeExpiryByApp: MutableMap<String, Instant> = mutableMapOf()
-    private val freeAllowancePrefs by lazy { getSharedPreferences("free_time_allowance_usage", Context.MODE_PRIVATE) }
-    private var freeAllowanceDay: String = currentDay()
+    private lateinit var categoryConfigManager: AppCategoryConfigManager
+    private lateinit var allowanceTracker: CategoryAllowanceTracker
 
     // Unified token bucket - owns its own state
     private lateinit var tokenBucket: TokenBucket
+
+    private fun neutralCategory(): ResolvedCategory = ResolvedCategory(
+        id = AppCategoryIds.DEFAULT,
+        label = "Default",
+        minutesChangePerMinute = null,
+        freeMinutesPerPeriod = 0,
+        freePeriodsPerDay = 0,
+        allowOverfill = false,
+        usesNeutralTimers = true,
+        emoji = "⏸"
+    )
+
+    private fun isDrainingCategory(category: ResolvedCategory): Boolean =
+        category.minutesChangePerMinute?.let { it < 0f } == true
+
+    private fun isRewardCategory(category: ResolvedCategory): Boolean =
+        category.minutesChangePerMinute?.let { it > 0f } == true
+
+    private fun categoryEmoji(category: ResolvedCategory): String {
+        if (category.emoji.isNotBlank()) return category.emoji
+        return when {
+            isDrainingCategory(category) -> "💀"
+            isRewardCategory(category) -> "🌸"
+            else -> "⏸"
+        }
+    }
 
     // Coroutine scope for background tasks like API calls
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -154,6 +186,13 @@ class AppUsageMonitorService : Service() {
         
         // Then initialize AIInteractionManager with the conversationHistoryManager
         aiManager = AIInteractionManager(this, conversationHistoryManager)
+
+        categoryConfigManager = AppCategoryConfigManager(this).also { it.migrateFromLegacyIfEmpty() }
+        allowanceTracker = CategoryAllowanceTracker(
+            getSharedPreferences("category_allowance_usage", Context.MODE_PRIVATE),
+            timeProvider
+        )
+        currentCategory = neutralCategory()
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
@@ -319,7 +358,10 @@ class AppUsageMonitorService : Service() {
         updateTimeTracking(effectiveInfo)
         
         val stateName = interactionStateManager.getStateName()
-        Log.v(TAG, "Main loop: State=$stateName, App=${effectiveInfo?.packageName}, Wasteful=${effectiveInfo?.isWasteful}")
+        Log.v(
+            TAG,
+            "Main loop: State=$stateName, App=${effectiveInfo?.packageName}, Category=${effectiveInfo?.category?.id}"
+        )
         
         // Use minimal API methods instead of pattern matching on internal state
         when {
@@ -338,7 +380,7 @@ class AppUsageMonitorService : Service() {
     private fun handleObservingState(appInfo: AppInfo?) {
         // Step 0-1 from interaction.md
         
-        val isWasteful = appInfo?.isWasteful == true
+        val isWasteful = appInfo?.category?.let { isDrainingCategory(it) } == true
         val isAllowed = if (appInfo != null) interactionStateManager.isAllowed(appInfo.readableName) else false
         val remaining = tokenBucket.getCurrentRemaining()
         if (!TriggerDecider.shouldTrigger(isWasteful, isAllowed, remaining)) {
@@ -362,9 +404,9 @@ class AppUsageMonitorService : Service() {
     }
 
     private fun handleConversationActiveState(appInfo: AppInfo?) {
-        // Check if user moved away from wasteful apps
-        if (appInfo?.isWasteful != true) {
-            Log.i(TAG, "User moved away from wasteful apps, resetting to observing")
+        // Check if user moved away from draining apps
+        if (appInfo?.category?.let { isDrainingCategory(it) } != true) {
+            Log.i(TAG, "User moved away from draining apps, resetting to observing")
             interactionStateManager.resetToObserving()
             return
         }
@@ -377,9 +419,9 @@ class AppUsageMonitorService : Service() {
     private fun handleWaitingForResponseState(appInfo: AppInfo?) {
         // Step 6a/6b from interaction.md
         
-        // Check if user moved away from wasteful apps
-        if (appInfo?.isWasteful != true) {
-            Log.i(TAG, "User moved away from wasteful apps during response wait, resetting")
+        // Check if user moved away from draining apps
+        if (appInfo?.category?.let { isDrainingCategory(it) } != true) {
+            Log.i(TAG, "User moved away from draining apps during response wait, resetting")
             interactionStateManager.resetToObserving()
             return
         }
@@ -515,16 +557,14 @@ class AppUsageMonitorService : Service() {
     private data class AppInfo(
         val packageName: String,
         val readableName: String,
-        val isWasteful: Boolean,
-        val isGoodApp: Boolean = false
+        val category: ResolvedCategory
     )
 
     private fun getAppInfoFromCurrentApp(): AppInfo? {
         val pkg = currentApp.takeIf { it.isNotEmpty() } ?: return null
         val readable = getReadableAppName(pkg)
-        val wasteful = isWastefulApp(pkg)
-        val goodApp = GoodAppManager.isGoodApp(applicationContext, pkg)
-        return AppInfo(packageName = pkg, readableName = readable, isWasteful = wasteful, isGoodApp = goodApp)
+        val category = categoryConfigManager.resolveCategory(pkg)
+        return AppInfo(packageName = pkg, readableName = readable, category = category)
     }
 
     private fun getCurrentAppUsage(): AppInfo? {
@@ -614,28 +654,20 @@ class AppUsageMonitorService : Service() {
                     return null
                 }
                 val readableName = getReadableAppName(currentForegroundApp)
-                val isWasteful = isWastefulApp(currentForegroundApp)
-                val isGoodApp = GoodAppManager.isGoodApp(applicationContext, currentForegroundApp)
-                
+                val resolvedCategory = categoryConfigManager.resolveCategory(currentForegroundApp)
+                val isDraining = isDrainingCategory(resolvedCategory)
+                val isRewarding = isRewardCategory(resolvedCategory)
+
                 // Debug logging for app detection
-                Log.d(TAG, "Detected app: $currentForegroundApp ($readableName) - Wasteful: $isWasteful, Good: $isGoodApp")
-                val selectedApps = TimeWasterAppManager.getSelectedApps(applicationContext)
-                Log.d(TAG, "Selected wasteful apps: $selectedApps")
-                if (!isWasteful && selectedApps.isNotEmpty()) {
-                    Log.w(TAG, "App $currentForegroundApp is NOT in selected apps list. Checking if it's X/Twitter with different package name...")
-                    // Check for common X/Twitter package name variations
-                    val xVariations = listOf("com.twitter.android", "com.x.android", "com.twitter", "twitter")
-                    val isX = xVariations.any { currentForegroundApp.contains(it, ignoreCase = true) }
-                    if (isX) {
-                        Log.w(TAG, "Detected X/Twitter app but it's not in selected list. Make sure you selected the correct package name: $currentForegroundApp")
-                    }
-                }
+                Log.d(
+                    TAG,
+                    "Detected app: $currentForegroundApp ($readableName) - Category: ${resolvedCategory.id}, draining=$isDraining, rewarding=$isRewarding"
+                )
                 
                 return AppInfo(
                     packageName = currentForegroundApp,
                     readableName = readableName,
-                    isWasteful = isWasteful,
-                    isGoodApp = isGoodApp
+                    category = resolvedCategory
                 )
             }
             
@@ -650,109 +682,85 @@ class AppUsageMonitorService : Service() {
 
     private fun updateTimeTracking(appInfo: AppInfo?) {
         val now = timeProvider.now()
-        ensureAllowanceDay(now)
         val detectedApp = appInfo?.packageName ?: ""
-        val freeActive = appInfo?.packageName?.let { isInFreeWindow(it, now) } == true
-        val isCurrentlyWasteful = appInfo?.isWasteful == true && !freeActive
-        val isCurrentlyGoodApp = appInfo?.isGoodApp == true
+        val category = appInfo?.category ?: neutralCategory()
+        val freeActive = appInfo?.packageName?.let { allowanceTracker.isInFreeWindow(it, now) } == true
+        val effectiveCategory = if (freeActive) neutralCategory() else category
+        val isCurrentlyDraining = isDrainingCategory(category) && !freeActive
 
-        // Determine the current app state
-        val currentAppState = when {
-            isCurrentlyWasteful -> AppState.WASTEFUL
-            isCurrentlyGoodApp -> AppState.GOOD
-            else -> AppState.NEUTRAL
-        }
-
-        // ---------------- Token bucket update ----------------
-        // The TokenBucket now owns its state and fetches current settings automatically
         val oldRemaining = tokenBucket.getCurrentRemaining()
-        
-        // Only update bucket if app state changed OR if we're in WASTEFUL state (to continuously drain)
-        // This prevents bucket from updating unnecessarily when in neutral/good states
-        val newRemaining = tokenBucket.update(appState = currentAppState)
-        
-        // Log bucket updates for debugging with more detail
+        val newRemaining = tokenBucket.update(effectiveCategory)
+
         if (oldRemaining != newRemaining) {
             val delta = oldRemaining - newRemaining
-            Log.d(TAG, "Bucket updated: ${oldRemaining.inWholeSeconds} s -> ${newRemaining.inWholeSeconds} s (delta: ${delta.inWholeSeconds} s, state: $currentAppState, app: ${appInfo?.readableName ?: "none"})")
+            Log.d(
+                TAG,
+                "Bucket updated: ${oldRemaining.inWholeSeconds} s -> ${newRemaining.inWholeSeconds} s (delta: ${delta.inWholeSeconds} s, category: ${effectiveCategory.id}, app: ${appInfo?.readableName ?: "none"})"
+            )
         }
 
-        // If bucket just transitioned from empty (<=0) to full (== max), archive & clear
         val becameFull = newRemaining >= SettingsManager.getMaxThreshold(this)
-        if (becameFull && isCurrentlyWasteful) {
-            Log.i(TAG, "Token bucket refilled to full while wasteful: archiving and clearing conversation.")
+        if (becameFull && isCurrentlyDraining) {
+            Log.i(TAG, "Token bucket refilled to full while draining: archiving and clearing conversation.")
             EventLogStore.logBucketRefilledAndReset()
             tryArchiveMemoriesThenClear(appInfo)
             interactionStateManager.resetToObserving()
-            
-            // Cancel the conversation notification since history is cleared
+
             notificationManager.cancel(NOTIFICATION_ID)
-            Log.d(TAG, "Cancelled conversation notification due to bucket refill and history clear")
-            
-            // Update stats notification to show current app time now that conversation is cleared
             updateStatsNotification()
         }
 
-        // ---------------- Existing time tracking logic ----------------
-
-        // App change detection and time accumulation logic
         if (detectedApp != currentApp) {
-             Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
-             
-             // Clear any active free window for previous app
-             freeExpiryByApp.remove(currentApp)
+            Log.d(TAG, "App changed from '$currentApp' to '$detectedApp'")
 
-             // Only log meaningful transitions (not "None → None")
-             val previousApp = if (currentApp.isNotEmpty()) currentApp else "None"
-             val newApp = if (detectedApp.isNotEmpty()) detectedApp else "None"
-             if (previousApp != newApp) {
-                 EventLogStore.logAppChanged(currentApp, detectedApp)
-             }
-             
-             // Add time spent on previous app IF IT WAS WASTEFUL
-             if (currentApp.isNotEmpty()) {
-                 if (isWastefulApp(currentApp)) {
-                     val timeSpent = now - lastAppChangeTime
-                     if (timeSpent < 5.minutes) { 
-                         sessionWastedTime += timeSpent
-                         dailyWastedTime += timeSpent
-                         Log.d(TAG, "Added $timeSpent to wasteful time (previous app: $currentApp)")
-                     } else {
-                          Log.w(TAG, "Ignoring large time difference ($timeSpent) for previous app: $currentApp")
-                     }
-                 }
-             }
+            val previousCategory = if (currentApp.isNotEmpty()) {
+                categoryConfigManager.resolveCategory(currentApp)
+            } else neutralCategory()
+            val previousFree = currentApp.isNotEmpty() && allowanceTracker.isInFreeWindow(currentApp, now)
+            if (currentApp.isNotEmpty() && isDrainingCategory(previousCategory) && !previousFree) {
+                val timeSpent = now - lastAppChangeTime
+                if (timeSpent < 5.minutes) {
+                    sessionWastedTime += timeSpent
+                    dailyWastedTime += timeSpent
+                    Log.d(TAG, "Added $timeSpent to draining time (previous app: $currentApp)")
+                } else {
+                    Log.w(TAG, "Ignoring large time difference ($timeSpent) for previous app: $currentApp")
+                }
+            }
 
-            // Update currentApp; if detection is empty, clear current app
+            val previousApp = if (currentApp.isNotEmpty()) currentApp else "None"
+            val newApp = if (detectedApp.isNotEmpty()) detectedApp else "None"
+            if (previousApp != newApp) {
+                EventLogStore.logAppChanged(currentApp, detectedApp)
+            }
+
             val appActuallyChanged = currentApp != detectedApp
             currentApp = detectedApp
+            currentCategory = category
             lastAppChangeTime = now
-            
-            // Only reset currentAppSessionStart when app actually changes
+
             if (appActuallyChanged && detectedApp.isNotEmpty()) {
                 currentAppSessionStart = now
             }
 
-             // Reset session timer ONLY when a *new* wasteful app starts
-             if (isWastefulApp(detectedApp)) {
-                  sessionWastedTime = Duration.ZERO
-                  sessionStart = now
-                  Log.d(TAG, "New wasteful app detected: $detectedApp. Reset session timer.")
-                  EventLogStore.logNewWastefulAppDetected(detectedApp)
-                  startFreeAllowanceIfEligible(detectedApp, now)
-             }
-         } else if (isCurrentlyWasteful) {
-             // Accumulate time for current wasteful app
-             val timeSpent = now - lastAppChangeTime
-              if (timeSpent < 5.minutes) {
-                 sessionWastedTime += timeSpent
-                 dailyWastedTime += timeSpent
-                 Log.v(TAG, "Accumulated $timeSpent for current wasteful app: $currentApp")
-              }
-             lastAppChangeTime = now
-         }
-         
-        wasPreviouslyWasteful = isCurrentlyWasteful
+            if (isCurrentlyDraining) {
+                sessionWastedTime = Duration.ZERO
+                sessionStart = now
+                Log.d(TAG, "New draining app detected: $detectedApp. Reset session timer.")
+                EventLogStore.logNewWastefulAppDetected(detectedApp)
+                allowanceTracker.startFreeWindowIfEligible(detectedApp, category, now)
+            }
+        } else if (isCurrentlyDraining) {
+            val timeSpent = now - lastAppChangeTime
+            if (timeSpent < 5.minutes) {
+                sessionWastedTime += timeSpent
+                dailyWastedTime += timeSpent
+                Log.v(TAG, "Accumulated $timeSpent for current draining app: $currentApp")
+            }
+            lastAppChangeTime = now
+        }
+
+        wasPreviouslyWasteful = isCurrentlyDraining
     }
 
     private fun tryArchiveMemoriesThenClear(appInfo: AppInfo?) {
@@ -797,10 +805,6 @@ class AppUsageMonitorService : Service() {
             // Finally clear histories for a new session
             conversationHistoryManager.clearHistories()
         }
-    }
-
-    private fun isWastefulApp(packageName: String): Boolean {
-        return TimeWasterAppManager.isTimeWasterApp(applicationContext, packageName)
     }
 
     private fun showConversationNotification(appName: String = "Unknown App", sessionTime: Duration = Duration.ZERO, dailyTime: Duration = Duration.ZERO) {
@@ -870,13 +874,7 @@ class AppUsageMonitorService : Service() {
         val monitoringStatus = "Monitoring: Active"
         val currentAppName = if (currentApp.isNotEmpty()) {
             val appName = getReadableAppName(currentApp)
-            val wasteful = isWastefulApp(currentApp)
-            val goodApp = GoodAppManager.isGoodApp(applicationContext, currentApp)
-            val emoji = when {
-                wasteful -> "💀"
-                goodApp -> "🌸"
-                else -> "?"
-            }
+            val emoji = categoryEmoji(currentCategory)
             "$appName $emoji"
         } else {
             "(no app detected)"
@@ -884,13 +882,13 @@ class AppUsageMonitorService : Service() {
         val maxThreshold = SettingsManager.getMaxThreshold(this)
         val bucketRemaining = tokenBucket.getCurrentRemaining()
         val now = timeProvider.now()
-        val freeActive = currentApp.isNotEmpty() && isInFreeWindow(currentApp, now)
+        val freeActive = currentApp.isNotEmpty() && allowanceTracker.isInFreeWindow(currentApp, now)
         
         // Always show the time, then add "full" if at max and won't increase without good apps
         val isAtMax = bucketRemaining >= maxThreshold
-        val isWasteful = currentApp.isNotEmpty() && isWastefulApp(currentApp)
-        val isGood = currentApp.isNotEmpty() && GoodAppManager.isGoodApp(applicationContext, currentApp)
-        val willNotIncrease = isAtMax && !isGood // Won't increase if at max and not using good app
+        val isWasteful = currentApp.isNotEmpty() && isDrainingCategory(currentCategory)
+        val isGood = currentApp.isNotEmpty() && isRewardCategory(currentCategory)
+        val willNotIncrease = isAtMax && !isGood // Won't increase if at max and not using rewarding app
         val bucketInUse = isWasteful && !freeActive
         
         val bucketText = buildString {
@@ -920,11 +918,9 @@ class AppUsageMonitorService : Service() {
             "Current App Time: ${formatDuration(timeSpent)}"
         } else null
         val freeTimeRemaining = if (freeActive) {
-            val expiry = freeExpiryByApp[currentApp]
-            val remaining = expiry?.let { it - now }
-            if (remaining != null && remaining.isPositive()) {
+            allowanceTracker.remainingFreeTime(currentApp, now)?.let { remaining ->
                 "Free time left: ${formatDuration(remaining)}"
-            } else null
+            }
         } else null
         val contentIntent = PendingIntent.getActivity(
             this,
@@ -1058,57 +1054,11 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    // ---------- Free allowance helpers ----------
-    private fun currentDay(now: Instant = timeProvider.now()): String {
-        val javaInstant = java.time.Instant.ofEpochMilli(now.toEpochMilliseconds())
-        return javaInstant.atZone(ZoneId.systemDefault()).toLocalDate().toString()
-    }
-
-    private fun ensureAllowanceDay(now: Instant = timeProvider.now()) {
-        val today = currentDay(now)
-        if (today != freeAllowanceDay) {
-            freeAllowanceDay = today
-            freeExpiryByApp.clear()
-            freeAllowancePrefs.edit().clear().apply()
-        }
-    }
-
-    private fun getUsesUsedToday(packageName: String): Int {
-        return freeAllowancePrefs.getInt("uses_${freeAllowanceDay}_$packageName", 0)
-    }
-
-    private fun incrementUses(packageName: String) {
-        val key = "uses_${freeAllowanceDay}_$packageName"
-        val current = freeAllowancePrefs.getInt(key, 0)
-        freeAllowancePrefs.edit().putInt(key, current + 1).apply()
-    }
-
-    private fun isInFreeWindow(packageName: String, now: Instant): Boolean {
-        val expiry = freeExpiryByApp[packageName] ?: return false
-        if (now < expiry) return true
-        freeExpiryByApp.remove(packageName)
-        return false
-    }
-
-    private fun startFreeAllowanceIfEligible(packageName: String, now: Instant) {
-        val allowance = TimeWasterAppManager.getFreeAllowance(this, packageName, 10.minutes, 4)
-        val minutes = allowance.first
-        val usesPerDay = allowance.second
-        if (minutes <= Duration.ZERO || usesPerDay <= 0) return
-        val used = getUsesUsedToday(packageName)
-        if (used >= usesPerDay) return
-        incrementUses(packageName)
-        val expiry = now + minutes
-        freeExpiryByApp[packageName] = expiry
-        Log.i(TAG, "Free allowance started for $packageName: $minutes min (use ${used + 1}/$usesPerDay) until $expiry")
-    }
-
     private fun buildLogContextLine(now: Instant = timeProvider.now()): String {
         val bucketRemaining = tokenBucket.getCurrentRemaining()
-        val freeActive = currentApp.isNotEmpty() && isInFreeWindow(currentApp, now)
+        val freeActive = currentApp.isNotEmpty() && allowanceTracker.isInFreeWindow(currentApp, now)
         val freeRemaining = if (freeActive) {
-            freeExpiryByApp[currentApp]?.let { expiry ->
-                val remaining = expiry - now
+            allowanceTracker.remainingFreeTime(currentApp, now)?.let { remaining ->
                 if (remaining.isPositive()) formatDuration(remaining) else "0 s"
             }
         } else null
