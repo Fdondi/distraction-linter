@@ -442,23 +442,8 @@ class AppUsageMonitorService : Service() {
                     }
                 }
 
-                // Step 4: If there was any non-tool answer, possibly infer ALLOW intent and display to user
+                // Step 4: If there was any non-tool answer,  display to user
                 if (parsedResponse.userMessage.isNotEmpty()) {
-                    // Fallback: infer ALLOW if model text implies time granting without tool
-                    try {
-                        val inferred = AllowIntentDetector.inferAllow(
-                            modelMessage = parsedResponse.userMessage,
-                            currentAppReadableName = appInfo?.readableName
-                        )
-                        if (inferred != null && parsedResponse.tools.none { it is ToolCommand.Allow }) {
-                            Log.i(TAG, "Inferred ALLOW from model text: ${inferred.duration} ${inferred.app?.let { " for $it" } ?: ""}")
-                            interactionStateManager.applyAllowCommand(inferred)
-                            conversationHistoryManager.addToolLog(inferred)
-                            shouldResetConversation = true
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to infer ALLOW intent: ${t.message}")
-                    }
                     conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
                     showConversationNotification(
                         appName = appInfo?.readableName ?: "Unknown App",

@@ -7,10 +7,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.BeforeClass
 
 class AILogScreenEditingTest {
 
@@ -20,9 +22,23 @@ class AILogScreenEditingTest {
 	@Before
 	fun setUp() {
 		val context = composeRule.activity
+        // Skip first-boot tutorial so tests land on the main UI immediately
+        ApiKeyManager.setFirstBootTutorialShown(context)
+        // Mark at least one wasteful app so first-boot heuristic doesn't trigger
+        TimeWasterAppManager.saveSelectedApps(context, setOf(context.packageName))
 		AIMemoryManager.clearAllMemories(context)
 		AIMemoryManager.setPermanentMemory(context, "Initial permanent")
 	}
+
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun primePrefs() {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            ApiKeyManager.setFirstBootTutorialShown(context)
+            TimeWasterAppManager.saveSelectedApps(context, setOf(context.packageName))
+        }
+    }
 
 	@After
 	fun tearDown() {

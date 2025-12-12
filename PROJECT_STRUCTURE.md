@@ -117,7 +117,7 @@ Memory and Settings
     - `getNeutralAppFillRateMultiplier` / `setNeutralAppFillRateMultiplier` - fill rate multiplier for neutral apps (default: 1.0x)
 
 - app/src/main/java/com/example/timelinter/ApiKeyManager.kt
-  - Stores API key, coach name, and user notes.
+  - Stores API key, Google ID token (for backend auth), coach name, and user notes.
 
 AI Configuration
 - app/src/main/java/com/example/timelinter/AIConfigManager.kt

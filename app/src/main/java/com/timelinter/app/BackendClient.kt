@@ -1,6 +1,8 @@
 package com.timelinter.app
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -9,8 +11,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 object BackendClient {
-    // Placeholder URL - specific to Android Emulator accessing host localhost
-    private const val BASE_URL = "http://10.0.2.2:8000" 
+    private const val BASE_URL = "https://my-gemini-backend-834588824353.europe-west1.run.app"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     
     private val client = OkHttpClient()
@@ -18,8 +19,9 @@ object BackendClient {
 
     @Serializable
     data class GenerateRequest(
-        val prompt: String,
-        val model: String
+        val model: String = "default",
+        val prompt: String? = null, // legacy compat
+        val contents: List<BackendContent> = emptyList(),
     )
 
     @Serializable
@@ -27,9 +29,28 @@ object BackendClient {
         val result: String
     )
 
+    @Serializable
+    data class BackendPart(val text: String)
+
+    @Serializable
+    data class BackendContent(
+        val role: String,
+        val parts: List<BackendPart>
+    )
+
     @Throws(IOException::class, Exception::class)
-    fun generate(token: String, prompt: String, model: String): String {
-        val requestBody = GenerateRequest(prompt, model)
+    fun generate(
+        token: String,
+        model: String,
+        contents: List<BackendContent>,
+        prompt: String? = null,
+    ): String {
+        val safeContents = if (contents.isEmpty() && prompt != null) {
+            listOf(BackendContent(role = "user", parts = listOf(BackendPart(text = prompt))))
+        } else {
+            contents
+        }
+        val requestBody = GenerateRequest(model = model, prompt = prompt, contents = safeContents)
         val jsonBody = json.encodeToString(GenerateRequest.serializer(), requestBody)
         
         val request = Request.Builder()
@@ -39,12 +60,16 @@ object BackendClient {
             .build()
 
         client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string()
             if (!response.isSuccessful) {
-                throw IOException("Unexpected code $response")
+                throw BackendHttpException(
+                    statusCode = response.code,
+                    message = responseBody ?: "Empty response body"
+                )
             }
-            
-            val responseBody = response.body?.string() ?: throw IOException("Empty response body")
-            val generateResponse = json.decodeFromString(GenerateResponse.serializer(), responseBody)
+
+            val bodyString = responseBody ?: throw IOException("Empty response body")
+            val generateResponse = json.decodeFromString(GenerateResponse.serializer(), bodyString)
             return generateResponse.result
         }
     }

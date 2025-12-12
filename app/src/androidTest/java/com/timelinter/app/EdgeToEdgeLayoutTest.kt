@@ -13,6 +13,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.junit.Assert.*
+import org.junit.Before
+import org.junit.BeforeClass
+import androidx.test.platform.app.InstrumentationRegistry
 
 /**
  * Instrumented test to verify edge-to-edge layout works correctly.
@@ -23,6 +26,24 @@ class EdgeToEdgeLayoutTest {
 
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun setUp() {
+        val context = composeTestRule.activity
+        // Ensure main flow is shown (skip first-boot tutorial and have at least one wasteful app)
+        ApiKeyManager.setFirstBootTutorialShown(context)
+        TimeWasterAppManager.saveSelectedApps(context, setOf("com.example.dummy"))
+    }
+
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun primePrefs() {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            ApiKeyManager.setFirstBootTutorialShown(context)
+            TimeWasterAppManager.saveSelectedApps(context, setOf("com.example.dummy"))
+        }
+    }
 
     @Test
     fun testTopBarNotHiddenBehindStatusBar() {

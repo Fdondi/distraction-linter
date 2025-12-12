@@ -4,6 +4,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -54,13 +55,13 @@ class AIConfigScreenTest {
         }
 
         // Click on first message task to expand model selection
-        composeTestRule.onNodeWithText("First Message").performClick()
+        composeTestRule.onNodeWithTag("model_selector_FIRST_MESSAGE").performClick()
 
         // Wait for dropdown to appear
         composeTestRule.waitForIdle()
 
         // Verify available models are shown
-        composeTestRule.onNodeWithText("Gemini 2.5 Pro")
+        composeTestRule.onNodeWithTag("model_option_FIRST_MESSAGE_${AIModelId.GEMINI_25_PRO.name}")
             .assertExists()
     }
 
@@ -71,16 +72,19 @@ class AIConfigScreenTest {
         }
 
         // Expand first message task dropdown
-        composeTestRule.onNodeWithText("First Message").performClick()
+        composeTestRule.onNodeWithTag("model_selector_FIRST_MESSAGE").performClick()
         composeTestRule.waitForIdle()
 
         // Select a different model
-        composeTestRule.onNodeWithText("Gemini 2.5 Flash").performClick()
+        composeTestRule.onNodeWithTag("model_option_FIRST_MESSAGE_${AIModelId.GEMINI_25_FLASH.name}")
+            .performClick()
         composeTestRule.waitForIdle()
 
         // Verify the model was changed
-        val config = AIConfigManager.getModelForTask(context, AITask.FIRST_MESSAGE)
-        assert(config.modelName == "gemini-2.5-flash")
+        composeTestRule.runOnIdle {
+            val config = AIConfigManager.getModelForTask(context, AITask.FIRST_MESSAGE)
+            assertEquals("gemini-2.5-flash", config.modelName)
+        }
     }
 
     @Test
@@ -101,8 +105,10 @@ class AIConfigScreenTest {
         composeTestRule.waitForIdle()
 
         // Verify default model is restored
-        val config = AIConfigManager.getModelForTask(context, AITask.FIRST_MESSAGE)
-        assert(config.modelName == "gemini-2.5-pro")
+        composeTestRule.runOnIdle {
+            val config = AIConfigManager.getModelForTask(context, AITask.FIRST_MESSAGE)
+            assertEquals("gemini-2.5-pro", config.modelName)
+        }
     }
 
     @Test

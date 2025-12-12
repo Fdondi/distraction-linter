@@ -50,13 +50,22 @@ object AIMemoryManager {
 
     fun addTemporaryMemory(context: Context, content: String, duration: Duration, timeProvider: TimeProvider = SystemTimeProvider) {
         val prefs = getPreferences(context)
-        val expiresAt = timeProvider.now() + duration
-        val key = "${TEMPORARY_MEMORY_PREFIX}${timeProvider.now().epochSeconds}"
+        val now = timeProvider.now()
+        val expiresAt = now + duration
 
-        val memoryItem = MemoryItem(content, timeProvider.now(), expiresAt)
+        // Use epoch milliseconds for uniqueness; fall back to suffixing if a collision still occurs.
+        val baseKey = "${TEMPORARY_MEMORY_PREFIX}${now.toEpochMilliseconds()}"
+        var key = baseKey
+        var collision = 0
+        while (prefs.contains(key)) {
+            collision += 1
+            key = "${baseKey}_$collision"
+        }
+
+        val memoryItem = MemoryItem(content, now, expiresAt)
         val serialized = Json.encodeToString(memoryItem)
         prefs.edit { putString(key, serialized) }
-        Log.d(TAG, "Added temporary memory for $duration: $content")
+        Log.d(TAG, "Added temporary memory for $duration: $content (key=$key)")
     }
 
     fun setPermanentMemory(context: Context, content: String) {

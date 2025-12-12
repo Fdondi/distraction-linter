@@ -2,31 +2,32 @@ package com.timelinter.app
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.toDuration
-import androidx.core.content.edit
 
 object SettingsManager {
     private const val PREF_NAME = "timelinter_settings"
     private const val OBSERVE_TIMER_MINUTES_KEY = "observe_timer_minutes"
     private const val RESPONSE_TIMER_MINUTES_KEY = "response_timer_minutes"
+    private const val WAKEUP_INTERVAL_SECONDS_KEY = "wakeup_interval_seconds"
     
     // Default values
     private const val DEFAULT_OBSERVE_TIMER_MINUTES = 5
     private const val DEFAULT_RESPONSE_TIMER_MINUTES = 1
+    private const val DEFAULT_WAKEUP_INTERVAL_SECONDS = 30L
 
     // Threshold bucket settings
     private const val MAX_THRESHOLD_MINUTES_KEY = "max_threshold_minutes"
-    private const val REPLENISH_INTERVAL_MINUTES_KEY = "replenish_interval_minutes" // How often (in minutes) to replenish
-    private const val REPLENISH_AMOUNT_MINUTES_KEY = "replenish_amount_minutes"      // How many minutes to replenish each interval
     private const val THRESHOLD_REMAINING_MS_KEY = "threshold_remaining_ms"           // Internal token bucket storage (ms)
+    private const val REPLENISH_RATE_FRACTION_KEY = "replenish_rate_fraction"
 
     // Defaults
     private const val DEFAULT_MAX_THRESHOLD_MINUTES = 5
-    private const val DEFAULT_REPLENISH_INTERVAL_MINUTES = 10
-    private const val DEFAULT_REPLENISH_AMOUNT_MINUTES = 1
+    private const val DEFAULT_REPLENISH_RATE_FRACTION = 0.1f // 6 minutes per hour (dimensionless fraction of an hour)
 
     // Good Apps settings keys
     private const val MAX_OVERFILL_MINUTES_KEY = "max_overfill_minutes"
@@ -42,7 +43,7 @@ object SettingsManager {
 
     // AI Mode
     private const val AI_MODE_KEY = "ai_mode"
-    const val AI_MODE_DIRECT = "direct"
+    const val AI_MODE_DIRECT = "direct" // kept for internal/dev only
     const val AI_MODE_BACKEND = "backend"
 
     private fun getPreferences(context: Context): SharedPreferences {
@@ -50,11 +51,21 @@ object SettingsManager {
     }
 
     fun getAIMode(context: Context): String {
-        return getPreferences(context).getString(AI_MODE_KEY, AI_MODE_DIRECT) ?: AI_MODE_DIRECT
+        val prefs = getPreferences(context)
+        val stored = prefs.getString(AI_MODE_KEY, AI_MODE_BACKEND)
+        // Force backend as the only supported mode; migrate any old "direct" value.
+        return if (stored == AI_MODE_BACKEND) {
+            AI_MODE_BACKEND
+        } else {
+            prefs.edit { putString(AI_MODE_KEY, AI_MODE_BACKEND) }
+            AI_MODE_BACKEND
+        }
     }
 
     fun setAIMode(context: Context, mode: String) {
-        getPreferences(context).edit { putString(AI_MODE_KEY, mode) }
+        // Only backend is supported in production; ignore other values.
+        val target = if (mode == AI_MODE_BACKEND) AI_MODE_BACKEND else AI_MODE_BACKEND
+        getPreferences(context).edit { putString(AI_MODE_KEY, target) }
     }
 
     fun getObserveTimer(context: Context): Duration {
@@ -65,6 +76,21 @@ object SettingsManager {
             putInt(
                 OBSERVE_TIMER_MINUTES_KEY,
                 duration.inWholeMinutes.toInt()
+            )
+        }
+    }
+
+    fun getWakeupInterval(context: Context): Duration {
+        val seconds = getPreferences(context).getLong(WAKEUP_INTERVAL_SECONDS_KEY, DEFAULT_WAKEUP_INTERVAL_SECONDS)
+        return seconds.seconds
+    }
+
+    fun setWakeupInterval(context: Context, duration: Duration) {
+        val clamped = duration.coerceIn(10.seconds, 10.minutes)
+        getPreferences(context).edit {
+            putLong(
+                WAKEUP_INTERVAL_SECONDS_KEY,
+                clamped.inWholeSeconds
             )
         }
     }
@@ -82,6 +108,21 @@ object SettingsManager {
         }
     }
 
+    /**
+     * Replenish rate expressed as a dimensionless fraction of an hour.
+     * Example: 6 minutes/hour = 0.1.
+     */
+    fun getReplenishRateFraction(context: Context): Float {
+        return getPreferences(context)
+            .getFloat(REPLENISH_RATE_FRACTION_KEY, DEFAULT_REPLENISH_RATE_FRACTION)
+            .coerceAtLeast(0f)
+    }
+
+    fun setReplenishRateFraction(context: Context, fraction: Float) {
+        val clamped = fraction.coerceAtLeast(0f)
+        getPreferences(context).edit { putFloat(REPLENISH_RATE_FRACTION_KEY, clamped) }
+    }
+
     /* =========================  Threshold Settings  ========================= */
 
     fun getMaxThreshold(context: Context): Duration {
@@ -97,31 +138,7 @@ object SettingsManager {
         }
     }
 
-    fun getReplenishInterval(context: Context): Duration {
-        return getPreferences(context).getInt(REPLENISH_INTERVAL_MINUTES_KEY, DEFAULT_REPLENISH_INTERVAL_MINUTES).minutes
-    }
-
-    fun setReplenishInterval(context: Context, duration: Duration) {
-        getPreferences(context).edit {
-            putInt(
-                REPLENISH_INTERVAL_MINUTES_KEY,
-                duration.inWholeMinutes.toInt()
-            )
-        }
-    }
-
-    fun getReplenishAmount(context: Context): Duration {
-        return getPreferences(context).getInt(REPLENISH_AMOUNT_MINUTES_KEY, DEFAULT_REPLENISH_AMOUNT_MINUTES).minutes
-    }
-
-    fun setReplenishAmount(context: Context, duration: Duration) {
-        getPreferences(context).edit {
-            putInt(
-                REPLENISH_AMOUNT_MINUTES_KEY,
-                duration.inWholeMinutes.toInt()
-            )
-        }
-    }
+    // Replenish interval/amount are now represented via the fraction; legacy APIs removed.
 
     /* =========================  Threshold Remaining (persistence)  ========================= */
     fun getThresholdRemaining(context: Context, defaultValue: Duration): Duration {

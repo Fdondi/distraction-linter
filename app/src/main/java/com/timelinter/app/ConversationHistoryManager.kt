@@ -6,10 +6,36 @@ import android.content.Context
 import android.util.Log
 import androidx.core.app.Person
 import com.google.ai.client.generativeai.type.Content
+import com.google.ai.client.generativeai.type.TextPart
 import com.google.ai.client.generativeai.type.content
 import java.util.Date
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
+
+private const val PART_PREVIEW_LIMIT = 500
+
+internal fun describeContentForLog(content: Content): String {
+    val role = content.role ?: "unknown"
+    val parts = try { content.parts } catch (_: Exception) { emptyList() }
+    val partDescriptions = parts.map { part ->
+        when (part) {
+            is TextPart -> {
+                val flattened = part.text.replace("\n", "\\n")
+                if (flattened.length > PART_PREVIEW_LIMIT) {
+                    "${flattened.take(PART_PREVIEW_LIMIT)}…(${flattened.length} chars)"
+                } else {
+                    flattened
+                }
+            }
+            else -> {
+                val simple = part::class.java.simpleName.ifBlank { "UnknownPart" }
+                "$simple:${part}"
+            }
+        }
+    }
+    val partsSummary = if (partDescriptions.isEmpty()) "no parts" else partDescriptions.joinToString(" | ")
+    return "Role=$role; Parts=$partsSummary"
+}
 
 class UserConversationHistory(private val coachName: String = "Adam") {
     private val conversation = mutableListOf<ChatMessage>()
@@ -195,11 +221,7 @@ class APIConversationHistory(
     fun logHistory() {
         Log.d(TAG, "API Conversation History (size: ${conversation.size}):")
         conversation.forEachIndexed { i, c -> 
-            Log.d(TAG, """
-                API[$i]:
-                - Role: ${c.role}
-                - Content: ${c.parts.firstOrNull()?: "empty"}
-            """.trimIndent())
+            Log.d(TAG, "API[$i]: ${describeContentForLog(c)}")
         }
     }
 

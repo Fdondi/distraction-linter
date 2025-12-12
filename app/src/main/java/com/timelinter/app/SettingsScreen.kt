@@ -45,10 +45,11 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
-import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.runtime.mutableFloatStateOf
 import kotlinx.coroutines.launch
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 @Composable
 fun SettingsScreen(
@@ -62,8 +63,22 @@ fun SettingsScreen(
     var selectedTab by remember { mutableStateOf(0) }
 
     // Timer settings
-    var observeTimer by remember { mutableStateOf(SettingsManager.getObserveTimer(context)) }
-    var responseTimer by remember { mutableStateOf(SettingsManager.getResponseTimer(context)) }
+    val responseMin = 10.seconds
+    val responseMax = 10.minutes
+    var responseSlider by remember {
+        mutableStateOf<Float>(
+            durationToSlider(SettingsManager.getResponseTimer(context), responseMin, responseMax)
+        )
+    }
+    val responseInterval = sliderToDuration(responseSlider, responseMin, responseMax)
+    val wakeupMin = 10.seconds
+    val wakeupMax = 10.minutes
+    var wakeupSlider by remember {
+        mutableStateOf<Float>(
+            durationToSlider(SettingsManager.getWakeupInterval(context), wakeupMin, wakeupMax)
+        )
+    }
+    val wakeupInterval: Duration = sliderToDuration(wakeupSlider, wakeupMin, wakeupMax)
 
     // Function to check if we can query packages
     // On Android 11+, package visibility is controlled by <queries> in manifest, not runtime permissions
@@ -300,80 +315,28 @@ fun SettingsScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        // Observe Timer Setting
-                        Card(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Text(
-                                    text = "Observe Timer",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "How long to wait before checking if you're wasting time again",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text("${observeTimer.inWholeMinutes} minutes")
-                                    Slider(
-                                        value = observeTimer.inWholeMinutes.toFloat(),
-                                        onValueChange = {
-                                            observeTimer = it.roundToInt().minutes
-                                            SettingsManager.setObserveTimer(context, observeTimer)
-                                            // Also update replenish interval to match observe timer
-                                            SettingsManager.setReplenishInterval(context, observeTimer)
-                                        },
-                                        valueRange = 1f..30f,
-                                        steps = 28,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
+                        // Wakeup Interval Setting (log scale 10s-10m)
+                        LogDurationCard(
+                            title = "Wakeup Interval",
+                            description = "How often the service wakes to check the current app (log scaled)",
+                            value = wakeupInterval,
+                            min = wakeupMin,
+                            max = wakeupMax
+                        ) { interval ->
+                            wakeupSlider = durationToSlider(interval, wakeupMin, wakeupMax)
+                            SettingsManager.setWakeupInterval(context, interval)
                         }
 
-                        // Response Timer Setting
-                        Card(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Text(
-                                    text = "Response Timer",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "How long to wait for your response before considering it ignored",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text("${responseTimer.inWholeMinutes} minute${if (responseTimer.inWholeMinutes > 1) "s" else ""}")
-                                    Slider(
-                                        value = responseTimer.inWholeMinutes.toFloat(),
-                                        onValueChange = {
-                                            responseTimer = it.roundToInt().minutes
-                                            SettingsManager.setResponseTimer(context, responseTimer)
-                                        },
-                                        valueRange = 1f..10f,
-                                        steps = 8,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
+                        // Response Timer Setting (log scale 10s-10m)
+                        LogDurationCard(
+                            title = "Response Timer",
+                            description = "How long to wait for your response before considering it ignored",
+                            value = responseInterval,
+                            min = responseMin,
+                            max = responseMax
+                        ) { duration ->
+                            responseSlider = durationToSlider(duration, responseMin, responseMax)
+                            SettingsManager.setResponseTimer(context, duration)
                         }
 
                         // Max Threshold Minutes Setting
@@ -413,20 +376,23 @@ fun SettingsScreen(
                             }
                         }
 
-                        // Replenish Amount Minutes Setting
+                        // Replenish Rate Setting (dimensionless fraction of an hour)
                         Card(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp)
                             ) {
-                                var replenishAmount by remember { mutableStateOf(SettingsManager.getReplenishAmount(context)) }
+                                var replenishRateFraction by remember {
+                                    mutableFloatStateOf(SettingsManager.getReplenishRateFraction(context))
+                                }
+                                val displayMinutesPerHour = (replenishRateFraction * 60f).roundToInt()
                                 Text(
-                                    text = "Replenish Amount",
+                                    text = "Replenish Rate",
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
-                                    text = "How many minutes are restored to your allowance each interval you stay off wasteful apps",
+                                    text = "Fraction of an hour restored when off wasteful apps (e.g., 0.1 = 6 min/hour)",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -435,15 +401,16 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    Text("${replenishAmount.inWholeMinutes} min")
+                                    Text(String.format("%.2f (≈%d min/hour)", replenishRateFraction, displayMinutesPerHour))
                                     Slider(
-                                        value = replenishAmount.inWholeMinutes.toFloat(),
-                                        onValueChange = {
-                                            replenishAmount = it.roundToInt().minutes
-                                            SettingsManager.setReplenishAmount(context, replenishAmount)
+                                        value = replenishRateFraction,
+                                        onValueChange = { value ->
+                                            val clamped = value.coerceIn(0f, 2f) // allow up to 120 min/hour if desired
+                                            replenishRateFraction = clamped
+                                            SettingsManager.setReplenishRateFraction(context, clamped)
                                         },
-                                        valueRange = 1f..10f,
-                                        steps = 9,
+                                        valueRange = 0f..2f,
+                                        steps = 200,
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
@@ -466,10 +433,10 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again (also used as the replenish interval)\n" +
-                                            "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up\n" +
-                                            "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)\n" +
-                                            "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer)",
+                                    text = "• Wakeup Interval: How often the service wakes up to check the current app (log scaled 10s–10m).\n" +
+                                            "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up.\n" +
+                                            "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size).\n" +
+                                            "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -485,84 +452,47 @@ fun SettingsScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        var aiMode by remember { mutableStateOf(SettingsManager.getAIMode(context)) }
-                        var apiKey by remember { mutableStateOf(ApiKeyManager.getKey(context) ?: "") }
-                        var isSignedIn by remember { mutableStateOf(!ApiKeyManager.getGoogleIdToken(context).isNullOrEmpty()) }
+                        // Force backend mode always; hide direct mode.
+                        LaunchedEffect(Unit) {
+                            SettingsManager.setAIMode(context, SettingsManager.AI_MODE_BACKEND)
+                        }
+                        var isSignedIn by remember { mutableStateOf(ApiKeyManager.hasGoogleIdToken(context)) }
                         val coroutineScope = rememberCoroutineScope()
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("AI Mode", style = MaterialTheme.typography.titleMedium)
+                                Text("AI Access (Subscription)", style = MaterialTheme.typography.titleMedium)
                                 Spacer(modifier = Modifier.height(8.dp))
-                                
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    RadioButton(
-                                        selected = aiMode == SettingsManager.AI_MODE_DIRECT,
-                                        onClick = { 
-                                            aiMode = SettingsManager.AI_MODE_DIRECT
-                                            SettingsManager.setAIMode(context, aiMode)
-                                        }
+                                Text(
+                                    "Backend mode is always used.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (isSignedIn) {
+                                    // Collapse the sign-in section once signed in.
+                                    Text("✅ Signed in with Google", color = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Subscription-backed AI is active.",
+                                        style = MaterialTheme.typography.bodySmall
                                     )
-                                    Text("Direct (API Key)")
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    RadioButton(
-                                        selected = aiMode == SettingsManager.AI_MODE_BACKEND,
-                                        onClick = { 
-                                            aiMode = SettingsManager.AI_MODE_BACKEND
-                                            SettingsManager.setAIMode(context, aiMode)
+                                } else {
+                                    Text("Not signed in", color = MaterialTheme.colorScheme.error)
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(onClick = {
+                                        coroutineScope.launch {
+                                            val token = AuthManager.signIn(context)
+                                            if (token != null) {
+                                                isSignedIn = true
+                                            }
                                         }
-                                    )
-                                    Text("Subscription (Backend)")
+                                    }) {
+                                        Text("Sign in with Google")
+                                    }
                                 }
                             }
-                        }
-
-                        if (aiMode == SettingsManager.AI_MODE_DIRECT) {
-                             OutlinedTextField(
-                                 value = apiKey,
-                                 onValueChange = { 
-                                     apiKey = it
-                                     ApiKeyManager.saveKey(context, it)
-                                 },
-                                 label = { Text("Gemini API Key") },
-                                 modifier = Modifier.fillMaxWidth(),
-                                 visualTransformation = PasswordVisualTransformation()
-                             )
-                             Text(
-                                 text = "Get your API key from Google AI Studio",
-                                 style = MaterialTheme.typography.bodySmall,
-                                 color = MaterialTheme.colorScheme.onSurfaceVariant
-                             )
-                        } else {
-                             Card(modifier = Modifier.fillMaxWidth()) {
-                                 Column(modifier = Modifier.padding(16.dp)) {
-                                     Text("Subscription Status", style = MaterialTheme.typography.titleMedium)
-                                     Spacer(modifier = Modifier.height(8.dp))
-                                     
-                                     if (isSignedIn) {
-                                         Text("✅ Signed in with Google", color = MaterialTheme.colorScheme.primary)
-                                         Spacer(modifier = Modifier.height(8.dp))
-                                         Text(
-                                             text = "The app will use your subscription to access AI features.",
-                                             style = MaterialTheme.typography.bodySmall
-                                         )
-                                     } else {
-                                         Text("Not signed in", color = MaterialTheme.colorScheme.error)
-                                         Spacer(modifier = Modifier.height(16.dp))
-                                         Button(onClick = {
-                                             coroutineScope.launch {
-                                                 val token = AuthManager.signIn(context)
-                                                 if (token != null) {
-                                                     isSignedIn = true
-                                                 }
-                                             }
-                                         }) {
-                                             Text("Sign in with Google")
-                                         }
-                                     }
-                                 }
-                             }
                         }
                     }
                 }

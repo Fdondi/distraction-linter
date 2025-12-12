@@ -277,6 +277,7 @@ fun TaskConfigurationCard(
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 availableModels.forEach { model ->
                     DropdownMenuItem(
+                        modifier = Modifier.testTag("model_option_${task.name}_${model.id.name}"),
                         text = {
                             Column {
                                 Text(model.displayName)

@@ -28,8 +28,7 @@ class ScreenUnlockBehaviorTest {
             .commit()
 
         SettingsManager.setMaxThreshold(context, 30.minutes)
-        SettingsManager.setReplenishInterval(context, 10.minutes)
-        SettingsManager.setReplenishAmount(context, 5.minutes)
+        SettingsManager.setReplenishRateFraction(context, 0.5f) // 30 min/hour
         SettingsManager.setThresholdRemaining(context, 0.minutes)
         SettingsManager.setMaxOverfill(context, 30.minutes)
         SettingsManager.setOverfillDecayPerHour(context, 10.minutes)

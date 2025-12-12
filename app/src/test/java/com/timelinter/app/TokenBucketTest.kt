@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 class TokenBucketTest {
@@ -28,8 +29,7 @@ class TokenBucketTest {
             .commit()
 
         SettingsManager.setMaxThreshold(context, 5.minutes)
-        SettingsManager.setReplenishInterval(context, 10.minutes)
-        SettingsManager.setReplenishAmount(context, 1.minutes)
+        SettingsManager.setReplenishRateFraction(context, 0.1f) // 6 min/hour
         SettingsManager.setThresholdRemaining(context, 5.minutes)
     }
 
@@ -65,7 +65,7 @@ class TokenBucketTest {
         bucket.update(AppState.NEUTRAL)
         time.advanceMinutes(5)
         var remaining = bucket.update(AppState.NEUTRAL)
-        assertEquals("No replenish yet at half interval", 1.minutes, remaining)
+        assertEquals("Replenish proportionally at 5 minutes", 90.seconds, remaining)
 
         time.advanceMinutes(5)
         remaining = bucket.update(AppState.NEUTRAL)

@@ -30,8 +30,7 @@ class GoodAppsTokenBucketTest {
             .commit()
 
         SettingsManager.setMaxThreshold(context, 5.minutes)
-        SettingsManager.setReplenishInterval(context, 5.minutes)
-        SettingsManager.setReplenishAmount(context, 1.minutes)
+        SettingsManager.setReplenishRateFraction(context, 0.2f) // 12 min/hour
         SettingsManager.setThresholdRemaining(context, 5.minutes)
         SettingsManager.setMaxOverfill(context, 30.minutes)
         SettingsManager.setOverfillDecayPerHour(context, 10.minutes)

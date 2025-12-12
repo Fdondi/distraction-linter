@@ -1,9 +1,11 @@
 package com.timelinter.app
 
+import android.util.Log
 import kotlin.time.Duration.Companion.minutes
 
-
 object AllowIntentDetector {
+    private const val TAG = "AllowIntentDetector"
+
     private val minutePattern = Regex("(\\d{1,3})\\s*(?:min|mins|minute|minutes)\\b", RegexOption.IGNORE_CASE)
 
     private val intentPatterns: List<Regex> = listOf(
@@ -33,16 +35,22 @@ object AllowIntentDetector {
         if (!hasIntent) return null
 
         val explicitMinutes = minutePattern.find(modelMessage)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (explicitMinutes != null) {
+            Log.d(TAG, "inferAllow: explicit minutes found=$explicitMinutes")
+        }
 
-        val minutes = explicitMinutes ?: run {
-            heuristicDurations.firstOrNull { it.first.containsMatchIn(modelMessage) }?.second ?: 10
+        val heuristicMatch = heuristicDurations.firstOrNull { it.first.containsMatchIn(modelMessage) }
+        val minutes = explicitMinutes ?: heuristicMatch?.second ?: 10
+
+        if (explicitMinutes == null) {
+            Log.d(TAG, "inferAllow: using ${heuristicMatch?.second ?: 10} minutes (heuristic=${heuristicMatch?.first?.pattern ?: "none"})")
         }
 
         val sanitizedMinutes = minutes.coerceIn(1, 240).minutes
 
         val app = currentAppReadableName?.takeIf { it.isNotBlank() }
+
+        Log.d(TAG, "inferAllow: returning allow duration=${sanitizedMinutes.inWholeMinutes}m app=$app")
         return ToolCommand.Allow(duration = sanitizedMinutes, app = app)
     }
 }
-
-

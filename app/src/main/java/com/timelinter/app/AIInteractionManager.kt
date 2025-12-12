@@ -5,6 +5,7 @@ import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.TextPart
+import com.timelinter.app.BackendPayloadBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,12 +23,22 @@ Then keep updating the conversation this way, one AI and one user message.
 class AIInteractionManager(
     private val context: Context,
     private val conversationHistoryManager: ConversationHistoryManager,
-    defaultTask: AITask = AITask.FIRST_MESSAGE
+    defaultTask: AITask = AITask.FIRST_MESSAGE,
+    private val backendGateway: BackendGateway = RealBackendGateway(),
+    private val authProvider: suspend (Context) -> String? = { ctx -> AuthManager.signIn(ctx) },
 ) {
     private val tag = "AIInteractionManager"
     private var generativeModel: GenerativeModel? = null
     private var currentTask: AITask = defaultTask
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val backendAuthHelper = BackendAuthHelper(
+        signIn = { authProvider(context) },
+        getStoredToken = { ApiKeyManager.getGoogleIdToken(context) },
+        saveToken = { ApiKeyManager.saveGoogleIdToken(context, it) },
+        clearToken = { ApiKeyManager.clearGoogleIdToken(context) },
+        backend = backendGateway,
+    )
 
     init {
         initializeModel(defaultTask)
@@ -95,26 +106,37 @@ class AIInteractionManager(
         }
 
         if (mode == SettingsManager.AI_MODE_BACKEND) {
-             val token = ApiKeyManager.getGoogleIdToken(context)
-             if (token.isNullOrEmpty()) {
-                 Log.e(tag, "No Google ID Token found (Backend Mode)")
-                 return ParsedResponse(userMessage = "(Error: Not signed in. Please sign in via Settings.)", tools = emptyList())
-             }
-             
-             // Convert history to prompt
-             val prompt = history.joinToString("\n") { content -> 
-                 val role = if (content.role == "model") "AI" else "User"
-                 val text = content.parts.filterIsInstance<TextPart>()
-                     .joinToString(" ") { it.text }
-                 "$role: $text"
-             }
+             // Convert history to structured contents
+             val contentsPayload = BackendPayloadBuilder
+                 .toBackendContents(history)
+                 .ifEmpty {
+                     val fallbackText = history.joinToString("\n") { content ->
+                         content.parts.filterIsInstance<TextPart>().joinToString(" ") { it.text }
+                     }
+                     listOf(
+                         BackendClient.BackendContent(
+                             role = "user",
+                             parts = listOf(BackendClient.BackendPart(fallbackText))
+                         )
+                     )
+                 }
 
              val config = AIConfigManager.getModelForTask(context, task)
              val modelId = config.modelName 
 
              return try {
-                 val resultText = BackendClient.generate(token, prompt, modelId)
+                 val resultText = backendAuthHelper.generateWithAutoRefresh(
+                     model = modelId,
+                     contents = contentsPayload,
+                     prompt = null, // avoid legacy prompt duplication
+                 )
                  ParsedResponse(userMessage = resultText, tools = emptyList())
+             } catch (e: BackendAuthException) {
+                 Log.e(tag, "Backend auth error", e)
+                 ParsedResponse(userMessage = "(Backend Auth Error: ${e.message})", tools = emptyList())
+             } catch (e: BackendHttpException) {
+                 Log.e(tag, "Backend HTTP error", e)
+                 ParsedResponse(userMessage = "(Backend Error: HTTP ${e.statusCode})", tools = emptyList())
              } catch (e: Exception) {
                  Log.e(tag, "Backend error", e)
                  ParsedResponse(userMessage = "(Backend Error: ${e.message})", tools = emptyList())
@@ -141,21 +163,29 @@ class AIInteractionManager(
     ): ParsedResponse? {
          val mode = SettingsManager.getAIMode(context)
          if (mode == SettingsManager.AI_MODE_BACKEND) {
-             val token = ApiKeyManager.getGoogleIdToken(context)
-             if (token.isNullOrEmpty()) return null
-             
-             val prompt = contents.joinToString("\n") { content -> 
-                 val role = if (content.role == "model") "AI" else "User"
-                 val text = content.parts.filterIsInstance<TextPart>()
-                     .joinToString(" ") { it.text }
-                 "$role: $text"
-             }
              
              val config = AIConfigManager.getModelForTask(context, task)
              val modelId = config.modelName
 
              return try {
-                 val resultText = BackendClient.generate(token, prompt, modelId)
+                 val structured = BackendPayloadBuilder
+                     .toBackendContents(contents)
+                     .ifEmpty {
+                         val fallback = contents.joinToString("\n") { content ->
+                             content.parts.filterIsInstance<TextPart>().joinToString(" ") { it.text }
+                         }
+                         listOf(
+                             BackendClient.BackendContent(
+                                 role = "user",
+                                 parts = listOf(BackendClient.BackendPart(fallback))
+                             )
+                         )
+                     }
+                 val resultText = backendAuthHelper.generateWithAutoRefresh(
+                     model = modelId,
+                     contents = structured,
+                     prompt = null,
+                 )
                  ParsedResponse(userMessage = resultText, tools = emptyList())
              } catch (e: Exception) {
                  Log.e(tag, "Backend error (custom contents)", e)

@@ -1,17 +1,36 @@
 package com.timelinter.app
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider as MaterialDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Dedicated screen for configuring all timer-related settings. Extracted from the old SettingsScreen.
@@ -23,10 +42,24 @@ fun TimerSettingsScreen(
     val context = LocalContext.current
 
     // State holders backed by SettingsManager
-    var observeTimer by remember { mutableStateOf(SettingsManager.getObserveTimer(context)) }
-    var responseTimer by remember { mutableStateOf(SettingsManager.getResponseTimer(context)) }
+    val responseMin = 10.seconds
+    val responseMax = 10.minutes
+    var responseSlider by remember {
+        mutableStateOf<Float>(
+            durationToSlider(SettingsManager.getResponseTimer(context), responseMin, responseMax)
+        )
+    }
+    val responseDuration: Duration = sliderToDuration(responseSlider, responseMin, responseMax)
     var maxThreshold by remember { mutableStateOf(SettingsManager.getMaxThreshold(context)) }
-    var replenishAmount by remember { mutableStateOf(SettingsManager.getReplenishAmount(context)) }
+    var replenishRateFraction by remember { mutableFloatStateOf(SettingsManager.getReplenishRateFraction(context)) }
+    val wakeupMin = 10.seconds
+    val wakeupMax = 10.minutes
+    var wakeupSlider by remember {
+        mutableStateOf<Float>(
+            durationToSlider(SettingsManager.getWakeupInterval(context), wakeupMin, wakeupMax)
+        )
+    }
+    val wakeupInterval: Duration = sliderToDuration(wakeupSlider, wakeupMin, wakeupMax)
     
     // Good Apps settings
     var maxOverfill by remember { mutableStateOf(SettingsManager.getMaxOverfill(context)) }
@@ -53,66 +86,63 @@ fun TimerSettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Observe Timer Setting
-            TimerCard(
-                title = "Observe Timer",
-                description = "How long to wait before checking if you're wasting time again",
-                valueText = "${observeTimer.inWholeMinutes} minutes",
-                sliderValue = observeTimer.inWholeMinutes.toInt(),
-                valueRange = 1f..30f,
-                steps = 28,
-                onValueChange = { value ->
-                    observeTimer = value.minutes
-                    SettingsManager.setObserveTimer(context, observeTimer)
-                    // Keep replenish interval in sync
-                    SettingsManager.setReplenishInterval(context, observeTimer)
-                }
+            // Section header for timer observation (used by tests and UX clarity)
+            Text(
+                text = "Observe Timer",
+                style = MaterialTheme.typography.headlineSmall
             )
 
-            // Response Timer Setting
-            TimerCard(
+            // Wakeup Interval Setting (log scale 10s-10m)
+            LogDurationCard(
+                title = "Wakeup Interval",
+                description = "How often the service wakes to check the current app",
+                value = wakeupInterval,
+                min = wakeupMin,
+                max = wakeupMax
+            ) { duration ->
+                wakeupSlider = durationToSlider(duration, wakeupMin, wakeupMax)
+                SettingsManager.setWakeupInterval(context, duration)
+            }
+
+            // Response Timer Setting (log scale 10s-10m)
+            LogDurationCard(
                 title = "Response Timer",
                 description = "How long to wait for your response before considering it ignored",
-                valueText = "${responseTimer.inWholeMinutes} minutes",
-                sliderValue = responseTimer.inWholeMinutes.toInt(),
-                valueRange = 1f..10f,
-                steps = 8,
-                onValueChange = { value ->
-                    responseTimer = value.minutes
-                    SettingsManager.setResponseTimer(context, responseTimer)
-                }
-            )
+                value = responseDuration,
+                min = responseMin,
+                max = responseMax
+            ) { duration ->
+                responseSlider = durationToSlider(duration, responseMin, responseMax)
+                SettingsManager.setResponseTimer(context, duration)
+            }
 
             // Max Threshold Minutes Setting
-            TimerCard(
+            LinearDurationCard(
                 title = "Max Allowed Minutes",
                 description = "How much time you can spend in wasteful apps before intervention (bucket size)",
-                valueText = "${maxThreshold.inWholeMinutes} min",
-                sliderValue = maxThreshold.inWholeMinutes.toInt(),
-                valueRange = 1f..60f,
-                steps = 59,
-                onValueChange = { value ->
-                    maxThreshold = value.minutes
-                    SettingsManager.setMaxThreshold(context, maxThreshold)
-                }
-            )
+                value = maxThreshold,
+                valueRangeMinutes = 1f..60f,
+                steps = 59
+            ) { value ->
+                maxThreshold = value
+                SettingsManager.setMaxThreshold(context, maxThreshold)
+            }
 
-            // Replenish Amount Minutes Setting
-            TimerCard(
-                title = "Replenish Amount",
-                description = "How many minutes are restored to your allowance each interval you stay off wasteful apps",
-                valueText = "${replenishAmount.inWholeMinutes} min",
-                sliderValue = replenishAmount.inWholeMinutes.toInt(),
-                valueRange = 1f..10f,
-                steps = 9,
-                onValueChange = { value ->
-                    replenishAmount = value.minutes
-                    SettingsManager.setReplenishAmount(context, replenishAmount)
-                }
-            )
+            // Replenish Rate Setting
+            LinearDurationCard(
+                title = "Replenish Rate",
+                description = "Fraction of an hour restored when off wasteful apps (0.1 = 6 min/hour)",
+                value = (replenishRateFraction * 60.0).minutes,
+                valueRangeMinutes = 0f..120f,
+                steps = 120
+            ) { value ->
+                val fraction = (value.inWholeSeconds.toFloat() / 3600f).coerceIn(0f, 2f)
+                replenishRateFraction = fraction
+                SettingsManager.setReplenishRateFraction(context, fraction)
+            }
 
             // Divider and Good Apps section
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+            MaterialDivider(modifier = Modifier.padding(vertical = 16.dp))
             
             Text(
                 text = "Good Apps Rewards",
@@ -121,11 +151,11 @@ fun TimerSettingsScreen(
             )
 
             // Good App Fill Rate Multiplier
-            TimerCardFloat(
+            LinearFloatCard(
                 title = "Good App Fill Rate",
                 description = "How much faster good apps fill your bucket (e.g., 2.0 = twice as fast)",
                 valueText = "${"%.1f".format(goodAppFillRateMultiplier)}x",
-                sliderValue = goodAppFillRateMultiplier,
+                value = goodAppFillRateMultiplier,
                 valueRange = 0f..10f,
                 steps = 45,
                 onValueChange = { value ->
@@ -135,32 +165,28 @@ fun TimerSettingsScreen(
             )
 
             // Max Overfill
-            TimerCard(
+            LinearDurationCard(
                 title = "Max Overfill",
                 description = "Maximum bonus time you can accumulate beyond your normal limit",
-                valueText = "${maxOverfill.inWholeMinutes} min",
-                sliderValue = maxOverfill.inWholeMinutes.toInt(),
-                valueRange = 0f..60f,
-                steps = 60,
-                onValueChange = { value ->
-                    maxOverfill = value.minutes
-                    SettingsManager.setMaxOverfill(context, maxOverfill)
-                }
-            )
+                value = maxOverfill,
+                valueRangeMinutes = 0f..60f,
+                steps = 60
+            ) { value ->
+                maxOverfill = value
+                SettingsManager.setMaxOverfill(context, maxOverfill)
+            }
 
             // Overfill Decay
-            TimerCard(
+            LinearDurationCard(
                 title = "Overfill Decay Rate",
                 description = "How many minutes of bonus time decay per hour when not using good apps",
-                valueText = "${overfillDecayPerHour.inWholeMinutes} min/hour",
-                sliderValue = overfillDecayPerHour.inWholeMinutes.toInt(),
-                valueRange = 0f..30f,
-                steps = 30,
-                onValueChange = { value ->
-                    overfillDecayPerHour = value.minutes
-                    SettingsManager.setOverfillDecayPerHour(context, overfillDecayPerHour)
-                }
-            )
+                value = overfillDecayPerHour,
+                valueRangeMinutes = 0f..30f,
+                steps = 30
+            ) { value ->
+                overfillDecayPerHour = value
+                SettingsManager.setOverfillDecayPerHour(context, overfillDecayPerHour)
+            }
 
             // Info card
             Card(
@@ -171,15 +197,15 @@ fun TimerSettingsScreen(
                     Text(text = "How Timers Work", style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "• Observe Timer: After you stop using a time-wasting app, Time Linter waits this long before checking again (also used as the replenish interval)" +
-                                "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up" +
-                                "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)" +
-                                "• Replenish Amount: How much time is restored to your allowance each interval you stay off wasteful apps (interval = Observe Timer" +
+                        text = "• Wakeup Interval: How often the service wakes up to check the current app (log scaled 10s–10m)." +
+                                "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up." +
+                                "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)." +
+                                "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps." +
                                 " Unified Bucket System:" +
-                                "• Good App Fill Rate: How much faster good apps fill your bucket (can exceed normal limit)" +
-                                "• Neutral App Fill Rate: How fast neutral apps fill your bucket" +
-                                "• Max Overfill: Maximum extra time you can store beyond your normal limit" +
-                                "• Decay Rate: How fast overfill decays when not using good apps",
+                                "• Good App Fill Rate: How much faster good apps fill your bucket (can exceed normal limit)." +
+                                "• Neutral App Fill Rate: How fast neutral apps fill your bucket." +
+                                "• Max Overfill: Maximum extra time you can store beyond your normal limit." +
+                                "• Decay Rate: How fast overfill decays when not using good apps.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -188,61 +214,3 @@ fun TimerSettingsScreen(
         }
     }
 }
-
-@Composable
-private fun TimerCard(
-    title: String,
-    description: String,
-    valueText: String,
-    sliderValue: Int,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    onValueChange: (Int) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Text(text = description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = valueText)
-                Slider(
-                    value = sliderValue.toFloat(),
-                    onValueChange = { onValueChange(it.toInt()) },
-                    valueRange = valueRange,
-                    steps = steps,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TimerCardFloat(
-    title: String,
-    description: String,
-    valueText: String,
-    sliderValue: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    steps: Int,
-    onValueChange: (Float) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            Text(text = description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(text = valueText)
-                Slider(
-                    value = sliderValue,
-                    onValueChange = onValueChange,
-                    valueRange = valueRange,
-                    steps = steps,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-} 

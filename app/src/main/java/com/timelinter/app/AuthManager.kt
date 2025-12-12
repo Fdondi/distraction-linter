@@ -16,8 +16,7 @@ import java.util.UUID
 
 object AuthManager {
     private const val TAG = "AuthManager"
-    // TODO: Replace with your actual Web Client ID from Google Cloud Console
-    // This MUST match the one used by the backend.
+    // Web Client ID used for Google Sign-In; must match the backend configuration.
     private const val WEB_CLIENT_ID = "834588824353-dmcktqcifmgaovhfr0b37bdejjdq7lbn.apps.googleusercontent.com" 
 
     suspend fun signIn(context: Context): String? {

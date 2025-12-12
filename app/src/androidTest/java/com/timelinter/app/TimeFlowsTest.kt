@@ -26,8 +26,7 @@ class TimeFlowsTest {
         SettingsManager.setObserveTimer(appContext, 1.minutes)
         SettingsManager.setResponseTimer(appContext, 1.minutes)
         SettingsManager.setMaxThreshold(appContext, 1.minutes)
-        SettingsManager.setReplenishInterval(appContext, 10.minutes)
-        SettingsManager.setReplenishAmount(appContext, 1.minutes)
+        SettingsManager.setReplenishRateFraction(appContext, 0.1f) // 6 min/hour
         SettingsManager.setThresholdRemaining(appContext, 1.minutes)
         AIMemoryManager.clearAllMemories(appContext)
     }
@@ -39,8 +38,7 @@ class TimeFlowsTest {
 
     @Test
     fun flow1_thresholdExceeded_triggersConversationStart() {
-        SettingsManager.setReplenishInterval(appContext, Duration.ZERO)
-        SettingsManager.setReplenishAmount(appContext, Duration.ZERO)
+        SettingsManager.setReplenishRateFraction(appContext, 0f)
         SettingsManager.setThresholdRemaining(appContext, 1.minutes)
         val bucket = TokenBucket(appContext, fakeTime)
 

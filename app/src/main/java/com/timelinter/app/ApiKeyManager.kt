@@ -54,6 +54,15 @@ object ApiKeyManager {
         return getEncryptedString(context, GOOGLE_ID_TOKEN_PREF, null)
     }
 
+    fun hasGoogleIdToken(context: Context): Boolean {
+        return !getGoogleIdToken(context).isNullOrEmpty()
+    }
+
+    fun clearGoogleIdToken(context: Context) {
+        getPreferences(context).edit().remove(GOOGLE_ID_TOKEN_PREF).apply()
+        Log.i(TAG, "Google ID Token cleared.")
+    }
+
     fun hasKey(context: Context): Boolean {
         return !getKey(context).isNullOrEmpty()
     }

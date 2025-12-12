@@ -1,9 +1,12 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.timelinter.app
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
@@ -13,6 +16,7 @@ import org.junit.Test
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.ExperimentalTime
 
 class AIMemoryRulesAndTempUITest {
 
@@ -22,6 +26,7 @@ class AIMemoryRulesAndTempUITest {
 	@Before
 	fun setUp() {
 		val context = composeRule.activity
+		TemporaryAllowStore.clear(context)
 		AIMemoryManager.clearAllMemories(context)
 		AIMemoryManager.setPermanentMemory(context, "Permanent baseline")
 		AIMemoryManager.setMemoryRules(context, "Initial rules text")
@@ -33,6 +38,7 @@ class AIMemoryRulesAndTempUITest {
 
 	@After
 	fun tearDown() {
+		TemporaryAllowStore.clear(composeRule.activity)
 		AIMemoryManager.clearAllMemories(composeRule.activity)
 	}
 
@@ -64,6 +70,56 @@ class AIMemoryRulesAndTempUITest {
 		composeRule.onNodeWithText("Temp A1").assertExists()
 		composeRule.onNodeWithText("Temp A2").assertExists()
 		composeRule.onNodeWithText("Temp B1").assertExists()
+	}
+
+	@Test
+	fun temporaryAllowsAppear_andCanBeEditedOrRemoved() {
+		val context = composeRule.activity
+		val appName = "Test App"
+		val tagSuffix = "Test_App"
+
+		TemporaryAllowStore.upsertAllow(context, appName, 30.minutes)
+
+		// Open AI Log
+		composeRule.onNodeWithText("AI Log").performClick()
+
+		// Verify the allow card is visible
+		composeRule.onNodeWithTag("tempAllowRow-$tagSuffix").assertExists()
+		composeRule.onNodeWithText(appName).assertExists()
+
+		// Update remaining minutes to 45
+		val input = composeRule.onNodeWithTag("tempAllowInput-$tagSuffix")
+		input.performTextClearance()
+		input.performTextInput("45")
+		composeRule.onNodeWithTag("tempAllowSave-$tagSuffix").performClick()
+		composeRule.waitForIdle()
+
+		val updated = TemporaryAllowStore.getActiveAllows(context).firstOrNull()
+		requireNotNull(updated)
+		val remainingMinutes = updated.remainingDuration(SystemTimeProvider.now()).inWholeMinutes
+		assert(remainingMinutes in 44..45)
+
+		// Remove the allow and verify it disappears
+		composeRule.onNodeWithTag("tempAllowRemove-$tagSuffix").performClick()
+		composeRule.waitForIdle()
+		assert(TemporaryAllowStore.getActiveAllows(context).isEmpty())
+		composeRule.onNodeWithText(appName).assertDoesNotExist()
+	}
+
+	@Test
+	fun aiLogIsScrollableWithManyAllows() {
+		val context = composeRule.activity
+		TemporaryAllowStore.clear(context)
+		(1..15).forEach { idx ->
+			TemporaryAllowStore.upsertAllow(context, "App $idx", 30.minutes)
+		}
+
+		composeRule.onNodeWithText("AI Log").performClick()
+
+		// Ensure we can scroll to the last allow card
+		val lastTag = "tempAllowRow-App_15"
+		composeRule.onNodeWithTag(lastTag).performScrollTo()
+		composeRule.onNodeWithTag(lastTag).assertExists()
 	}
 }
 
