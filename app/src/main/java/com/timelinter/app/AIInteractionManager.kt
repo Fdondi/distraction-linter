@@ -38,6 +38,9 @@ class AIInteractionManager(
         saveToken = { ApiKeyManager.saveGoogleIdToken(context, it) },
         clearToken = { ApiKeyManager.clearGoogleIdToken(context) },
         backend = backendGateway,
+        getLastRefreshTimeMs = { ApiKeyManager.getGoogleIdTokenLastRefresh(context) },
+        saveLastRefreshTimeMs = { ApiKeyManager.setGoogleIdTokenLastRefresh(context, it) },
+        timeProviderMs = { System.currentTimeMillis() },
     )
 
     init {
@@ -130,10 +133,14 @@ class AIInteractionManager(
                      contents = contentsPayload,
                      prompt = null, // avoid legacy prompt duplication
                  )
-                 ParsedResponse(userMessage = resultText, tools = emptyList())
+                ParsedResponse(userMessage = resultText, tools = emptyList(), authExpired = false)
              } catch (e: BackendAuthException) {
                  Log.e(tag, "Backend auth error", e)
-                 ParsedResponse(userMessage = "(Backend Auth Error: ${e.message})", tools = emptyList())
+                ParsedResponse(
+                    userMessage = "(Backend Auth Error: ${e.message})",
+                    tools = emptyList(),
+                    authExpired = true,
+                )
              } catch (e: BackendHttpException) {
                  Log.e(tag, "Backend HTTP error", e)
                  ParsedResponse(userMessage = "(Backend Error: HTTP ${e.statusCode})", tools = emptyList())

@@ -18,6 +18,7 @@ object ApiKeyManager {
     private const val PREFERENCE_FILE_KEY = "com.example.timelinter.encrypted_prefs"
     private const val API_KEY_PREF = "gemini_api_key"
     private const val GOOGLE_ID_TOKEN_PREF = "google_id_token"
+    private const val GOOGLE_ID_LAST_REFRESH_PREF = "google_id_last_refresh_ms"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
     private const val USER_NOTES_PREF = "user_notes"
     private const val COACH_NAME_PREF = "coach_name"
@@ -47,6 +48,7 @@ object ApiKeyManager {
     fun saveGoogleIdToken(context: Context, token: String) {
         if (token.isBlank()) return
         putEncryptedString(context, GOOGLE_ID_TOKEN_PREF, token)
+        setGoogleIdTokenLastRefresh(context, System.currentTimeMillis())
         Log.i(TAG, "Google ID Token saved successfully.")
     }
 
@@ -58,8 +60,19 @@ object ApiKeyManager {
         return !getGoogleIdToken(context).isNullOrEmpty()
     }
 
+    fun setGoogleIdTokenLastRefresh(context: Context, timeMs: Long) {
+        getPreferences(context).edit().putLong(GOOGLE_ID_LAST_REFRESH_PREF, timeMs).apply()
+        Log.d(TAG, "Google ID token last refresh recorded: $timeMs")
+    }
+
+    fun getGoogleIdTokenLastRefresh(context: Context): Long? {
+        if (!getPreferences(context).contains(GOOGLE_ID_LAST_REFRESH_PREF)) return null
+        return getPreferences(context).getLong(GOOGLE_ID_LAST_REFRESH_PREF, 0L)
+    }
+
     fun clearGoogleIdToken(context: Context) {
         getPreferences(context).edit().remove(GOOGLE_ID_TOKEN_PREF).apply()
+        getPreferences(context).edit().remove(GOOGLE_ID_LAST_REFRESH_PREF).apply()
         Log.i(TAG, "Google ID Token cleared.")
     }
 

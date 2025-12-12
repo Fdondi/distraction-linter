@@ -6,7 +6,8 @@ import kotlin.time.Duration
 
 data class ParsedResponse(
     val userMessage: String,
-    val tools: List<ToolCommand>
+    val tools: List<ToolCommand>,
+    val authExpired: Boolean = false,
 )
 
 sealed class ToolCommand {

@@ -56,15 +56,31 @@ class BackendAuthHelper(
     private val saveToken: (String) -> Unit,
     private val clearToken: () -> Unit,
     private val backend: BackendGateway,
+    private val getLastRefreshTimeMs: () -> Long? = { null },
+    private val saveLastRefreshTimeMs: (Long) -> Unit = {},
+    private val timeProviderMs: () -> Long = { System.currentTimeMillis() },
 ) {
+    companion object {
+        const val AUTO_REFRESH_INTERVAL_MS: Long = 30L * 24 * 60 * 60 * 1000 // 30 days
+    }
+
     suspend fun generateWithAutoRefresh(
         model: String,
         contents: List<BackendClient.BackendContent>,
         prompt: String? = null,
     ): String {
         var token = getStoredToken()
+        val now = timeProviderMs()
+
+        val shouldProactivelyRefresh = shouldRefresh(now, token)
         if (token.isNullOrEmpty()) {
-            token = obtainFreshToken() ?: throw BackendAuthException("No Google ID token available")
+            token =
+                obtainFreshToken(now) ?: throw BackendAuthException("No Google ID token available")
+        } else if (shouldProactivelyRefresh) {
+            val refreshed = obtainFreshToken(now)
+            if (refreshed != null) {
+                token = refreshed
+            }
         }
 
         try {
@@ -73,15 +89,22 @@ class BackendAuthHelper(
             if (e.statusCode != 401) throw e
             // Token rejected; clear and retry once with a fresh token.
             clearToken()
-            val refreshed = obtainFreshToken()
+            val refreshed = obtainFreshToken(now)
                 ?: throw BackendAuthException("Unable to refresh Google ID token")
             return backend.generate(refreshed, model, contents, prompt)
         }
     }
 
-    private suspend fun obtainFreshToken(): String? {
+    private fun shouldRefresh(now: Long, token: String?): Boolean {
+        if (token.isNullOrEmpty()) return false
+        val lastRefresh = getLastRefreshTimeMs() ?: return true
+        return now - lastRefresh >= AUTO_REFRESH_INTERVAL_MS
+    }
+
+    private suspend fun obtainFreshToken(now: Long = timeProviderMs()): String? {
         val newToken = signIn() ?: return null
         saveToken(newToken)
+        saveLastRefreshTimeMs(now)
         return newToken
     }
 }

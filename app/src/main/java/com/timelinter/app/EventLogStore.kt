@@ -27,6 +27,7 @@ object EventLogStore {
     val events: StateFlow<List<EventLogEntry>> = _events.asStateFlow()
 
     private var nextId = 1L
+    private var contextLineProvider: (() -> String?)? = null
 
     fun clear() {
         _events.value = emptyList()
@@ -42,6 +43,10 @@ object EventLogStore {
             (entry.role?.lowercase()?.contains(q) == true) ||
             entry.type.name.lowercase().contains(q)
         }
+    }
+
+    fun setContextLineProvider(provider: (() -> String?)?) {
+        contextLineProvider = provider
     }
 
     fun logMessage(role: String, text: String) {
@@ -103,12 +108,23 @@ object EventLogStore {
     }
 
     private fun addEvent(type: EventType, title: String, details: String? = null, role: String? = null) {
+        val contextLine = contextLineProvider?.invoke()
+        val mergedDetails = buildString {
+            if (!details.isNullOrBlank()) {
+                append(details.trimEnd())
+                if (contextLine != null) appendLine()
+            }
+            if (!contextLine.isNullOrBlank()) {
+                append(contextLine)
+            }
+        }.ifBlank { null }
+
         val entry = EventLogEntry(
             id = nextId++,
             timestamp = System.currentTimeMillis(),
             type = type,
             title = title,
-            details = details,
+            details = mergedDetails,
             role = role
         )
         // Prepend so the most recent events are always at the top

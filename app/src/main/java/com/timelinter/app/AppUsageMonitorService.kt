@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.UserManager
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
@@ -128,6 +129,7 @@ class AppUsageMonitorService : Service() {
 
     // State tracking
     @Volatile private var wasPreviouslyWasteful = false
+    @Volatile private var authExpired = false
 
     override fun onCreate() {
         super.onCreate()
@@ -160,6 +162,7 @@ class AppUsageMonitorService : Service() {
 
         // Initialize token bucket - it will handle its own state
         tokenBucket = TokenBucket(this, timeProvider)
+        EventLogStore.setContextLineProvider { buildLogContextLine() }
 
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
@@ -413,6 +416,11 @@ class AppUsageMonitorService : Service() {
                 if (parsedResponse == null) {
                      Log.e(TAG, "AI Response was null")
                      return@launch
+                }
+
+                if (authExpired != parsedResponse.authExpired) {
+                    authExpired = parsedResponse.authExpired
+                    updateStatsNotification()
                 }
 
                 // Process tools
@@ -918,7 +926,18 @@ class AppUsageMonitorService : Service() {
                 "Free time left: ${formatDuration(remaining)}"
             } else null
         } else null
-        
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val iconRes = if (authExpired) R.drawable.ic_warning_sign else R.mipmap.ic_launcher
+        val authFooter = if (authExpired) "Google login expired - tap to re-login" else null
+
         Log.d(TAG, "Creating stats notification. App: $currentAppName (package: $currentApp), Session: ${sessionWastedTime}, Daily: ${dailyWastedTime}, Bucket: ${bucketRemaining}")
         
         // Build notification text with current app time when bucket is being consumed
@@ -938,21 +957,27 @@ class AppUsageMonitorService : Service() {
             appendLine("Session Time: ${formatDuration(sessionWastedTime)}")
             appendLine("Daily Time: ${formatDuration(dailyWastedTime)}")
             appendLine(bucketText)
+            authFooter?.let { appendLine(it) }
         }
-        
+
         val builder = NotificationCompat.Builder(this, STATS_CHANNEL_ID)
             .setContentTitle("Time Linter")
-            .setContentText(monitoringStatus)
+            .setContentText(authFooter ?: monitoringStatus)
             .setStyle(NotificationCompat.BigTextStyle()
                 .bigText(notificationText)
                  .setSummaryText("Time Linter Stats")
             )
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(iconRes)
             .setPriority(NotificationCompat.PRIORITY_MIN) 
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSound(null) 
             .setVibrate(longArrayOf(0L))
+            .setContentIntent(contentIntent)
+
+        if (authFooter != null) {
+            builder.setSubText(authFooter)
+        }
             
         return builder.build()
     }
@@ -1077,6 +1102,23 @@ class AppUsageMonitorService : Service() {
         freeExpiryByApp[packageName] = expiry
         Log.i(TAG, "Free allowance started for $packageName: $minutes min (use ${used + 1}/$usesPerDay) until $expiry")
     }
+
+    private fun buildLogContextLine(now: Instant = timeProvider.now()): String {
+        val bucketRemaining = tokenBucket.getCurrentRemaining()
+        val freeActive = currentApp.isNotEmpty() && isInFreeWindow(currentApp, now)
+        val freeRemaining = if (freeActive) {
+            freeExpiryByApp[currentApp]?.let { expiry ->
+                val remaining = expiry - now
+                if (remaining.isPositive()) formatDuration(remaining) else "0 s"
+            }
+        } else null
+        val freeLabel = if (freeActive) {
+            if (freeRemaining != null) "active ($freeRemaining)" else "active"
+        } else {
+            "inactive"
+        }
+        return "Context: bucket=${formatDuration(bucketRemaining)} free=$freeLabel"
+    }
     private fun formatDuration(duration: Duration): String {
         val hours = duration.inWholeHours
         val minutes = duration.inWholeMinutes % 60
@@ -1114,6 +1156,7 @@ class AppUsageMonitorService : Service() {
         serviceScope.cancel()
         executor.shutdown()
         isMonitoringScheduled.set(false)
+        EventLogStore.setContextLineProvider(null)
         
         // Cancel all notifications when service is destroyed
         notificationManager.cancelAll()
@@ -1149,6 +1192,17 @@ class AppUsageMonitorService : Service() {
         return this::notificationManager.isInitialized &&
                this::aiManager.isInitialized &&
                this::conversationHistoryManager.isInitialized &&
-               this::interactionStateManager.isInitialized
+               this::interactionStateManager.isInitialized &&
+               this::tokenBucket.isInitialized
+    }
+
+    @VisibleForTesting
+    internal fun buildStatsNotificationForTests(): android.app.Notification {
+        return createStatsNotification()
+    }
+
+    @VisibleForTesting
+    internal fun markBackendAuthExpiredForTests(expired: Boolean) {
+        authExpired = expired
     }
 }
