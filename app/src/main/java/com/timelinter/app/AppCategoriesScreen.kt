@@ -184,17 +184,23 @@ fun AppCategoriesScreen(onNavigateBack: () -> Unit, navigationActions: Navigatio
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(categories, key = { it.id }) { category ->
-                    val appsForCategory = installedApps
-                        .filter { (assignments[it.packageName] ?: AppCategoryIds.DEFAULT) == category.id }
+                val filteredAppsByCategory = categories.mapNotNull { cat ->
+                    val appsForCat = installedApps
+                        .filter { (assignments[it.packageName] ?: AppCategoryIds.DEFAULT) == cat.id }
                         .filter { searchQuery.isBlank() || it.appName.contains(searchQuery, ignoreCase = true) }
+                    if (appsForCat.isNotEmpty()) cat to appsForCat else null
+                }
+
+                val autoExpand = searchQuery.isNotBlank() && filteredAppsByCategory.size <= 10
+
+                items(filteredAppsByCategory, key = { it.first.id }) { (category, appsForCategory) ->
                     val availableApps = installedApps
                         .filter { (assignments[it.packageName] ?: AppCategoryIds.DEFAULT) != category.id }
                         .filter { searchQuery.isBlank() || it.appName.contains(searchQuery, ignoreCase = true) }
                     CategoryCard(
                         category = category,
                         isEditable = category.id !in listOf(AppCategoryIds.DEFAULT, AppCategoryIds.CUSTOM),
-                        expanded = expandedCategories.contains(category.id),
+                        expanded = expandedCategories.contains(category.id) || autoExpand,
                         onToggleExpanded = {
                             if (expandedCategories.contains(category.id)) {
                                 expandedCategories.remove(category.id)
@@ -409,14 +415,14 @@ private fun CategoryCard(
                     } else {
                         apps.forEach { app ->
                             val currentCat = assignments[app.packageName] ?: AppCategoryIds.DEFAULT
-                            AppAssignmentRow(
-                                app = app,
-                                categories = allCategories,
-                                currentCategory = currentCat,
-                                expanded = expandedFor == app.packageName,
-                                onExpandedChange = { expandedFor = if (expandedFor == it) null else it },
-                                onAssign = onAssign
-                            )
+                    AppAssignmentRow(
+                        app = app,
+                        categories = allCategories,
+                        currentCategory = currentCat,
+                        expanded = expandedFor == app.packageName,
+                        onExpandedChange = { expandedFor = if (expandedFor == it) null else it },
+                        onAssign = onAssign
+                    )
                         }
                     }
 
@@ -573,17 +579,15 @@ private fun AppAssignmentRow(
         ) {
             Text(app.appName, modifier = Modifier.weight(1f))
             Text(
-                categories.firstOrNull { it.id == currentCategory }
-                    ?.let { "${it.label}${if (it.emoji.isNotBlank()) " ${it.emoji}" else ""}" }
-                    ?: "Default",
+                "Move",
                 style = MaterialTheme.typography.bodySmall
             )
             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange("") }) {
+            DropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange("") }) {
             categories.forEach { cat ->
                 DropdownMenuItem(
-                    text = { Text("${cat.label}${if (cat.emoji.isNotBlank()) " ${cat.emoji}" else ""}") },
+                        text = { Text("to ${cat.label}${if (cat.emoji.isNotBlank()) " ${cat.emoji}" else ""}") },
                     onClick = {
                         if (cat.id == AppCategoryIds.CUSTOM) {
                             val params = CategoryParameters(
