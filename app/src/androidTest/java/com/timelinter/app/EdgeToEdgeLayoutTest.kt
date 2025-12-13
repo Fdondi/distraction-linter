@@ -51,7 +51,7 @@ class EdgeToEdgeLayoutTest {
         composeTestRule.waitForIdle()
 
         // Find the top bar by looking for one of the icon buttons
-        val topBarButton = composeTestRule.onNodeWithContentDescription("Wasteful Apps")
+        val topBarButton = composeTestRule.onNodeWithContentDescription("Home")
         
         // Verify the top bar exists
         topBarButton.assertExists()
@@ -112,7 +112,7 @@ class EdgeToEdgeLayoutTest {
         assertTrue("Status bar inset should be reported", statusBarInset > 0f)
 
         // Top bar content should be laid out below the status bar inset
-        val topBarButton = composeTestRule.onNodeWithContentDescription("Wasteful Apps")
+        val topBarButton = composeTestRule.onNodeWithContentDescription("Home")
         topBarButton.assertExists()
         val buttonBounds = topBarButton.fetchSemanticsNode().boundsInRoot
         assertTrue(
@@ -126,14 +126,14 @@ class EdgeToEdgeLayoutTest {
         composeTestRule.waitForIdle()
 
         // Find multiple top bar elements
-        val wastefulAppsButton = composeTestRule.onNodeWithContentDescription("Wasteful Apps")
-        val goodAppsButton = composeTestRule.onNodeWithContentDescription("Good Apps")
+        val homeButton = composeTestRule.onNodeWithContentDescription("Home")
+        val categoriesButton = composeTestRule.onNodeWithContentDescription("App Categories")
         
-        wastefulAppsButton.assertExists()
-        goodAppsButton.assertExists()
+        homeButton.assertExists()
+        categoriesButton.assertExists()
 
-        val button1Bounds = wastefulAppsButton.fetchSemanticsNode().boundsInRoot
-        val button2Bounds = goodAppsButton.fetchSemanticsNode().boundsInRoot
+        val button1Bounds = homeButton.fetchSemanticsNode().boundsInRoot
+        val button2Bounds = categoriesButton.fetchSemanticsNode().boundsInRoot
 
         // Both buttons should be on roughly the same vertical level (in the same top bar)
         val verticalDifference = kotlin.math.abs(button1Bounds.top - button2Bounds.top)
@@ -189,14 +189,14 @@ class EdgeToEdgeLayoutTest {
     fun topMenuAvailableAcrossScreens() {
         composeTestRule.waitForIdle()
 
-        // Open Good Apps from the top menu
-        composeTestRule.onNodeWithContentDescription("Good Apps").performClick()
+        // Open App Categories from the top menu
+        composeTestRule.onNodeWithContentDescription("App Categories").performClick()
         composeTestRule.waitForIdle()
 
         // Menu icons should still be visible on the Good Apps screen
         listOf(
-            "Wasteful Apps",
-            "Good Apps",
+            "Home",
+            "App Categories",
             "Timer Settings",
             "AI Log",
             "AI Configuration"
@@ -209,8 +209,8 @@ class EdgeToEdgeLayoutTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("AI Memory").assertExists()
         listOf(
-            "Wasteful Apps",
-            "Good Apps",
+            "Home",
+            "App Categories",
             "Timer Settings",
             "AI Log",
             "AI Configuration"
@@ -223,8 +223,8 @@ class EdgeToEdgeLayoutTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Observe Timer").assertExists()
         listOf(
-            "Wasteful Apps",
-            "Good Apps",
+            "Home",
+            "App Categories",
             "Timer Settings",
             "AI Log",
             "AI Configuration"
@@ -238,22 +238,22 @@ class EdgeToEdgeLayoutTest {
         composeTestRule.waitForIdle()
 
         // Test main screen
-        var topButton = composeTestRule.onNodeWithContentDescription("Wasteful Apps")
+        var topButton = composeTestRule.onNodeWithContentDescription("Home")
         topButton.assertExists()
         var mainScreenTopY = topButton.fetchSemanticsNode().boundsInRoot.top
         assertTrue("Main screen top bar should be below status bar", mainScreenTopY > 0f)
 
-        // Navigate to Good Apps screen
-        composeTestRule.onNodeWithContentDescription("Good Apps").performClick()
+        // Navigate to App Categories screen
+        composeTestRule.onNodeWithContentDescription("App Categories").performClick()
         composeTestRule.waitForIdle()
         
-        val goodAppsBackButton = composeTestRule.onNodeWithContentDescription("Back")
-        goodAppsBackButton.assertExists()
-        val goodAppsTopY = goodAppsBackButton.fetchSemanticsNode().boundsInRoot.top
-        assertTrue("Good Apps screen top bar should be below status bar", goodAppsTopY > 0f)
+        val categoriesBackButton = composeTestRule.onNodeWithContentDescription("Back")
+        categoriesBackButton.assertExists()
+        val categoriesTopY = categoriesBackButton.fetchSemanticsNode().boundsInRoot.top
+        assertTrue("App Categories screen top bar should be below status bar", categoriesTopY > 0f)
         
         // Go back
-        goodAppsBackButton.performClick()
+        categoriesBackButton.performClick()
         composeTestRule.waitForIdle()
 
         // Navigate to AI Log screen
@@ -266,7 +266,7 @@ class EdgeToEdgeLayoutTest {
         assertTrue("AI Log screen top bar should be below status bar", logTopY > 0f)
 
         // All screens should have similar top bar positioning
-        val topYPositions = listOf(mainScreenTopY, goodAppsTopY, logTopY)
+        val topYPositions = listOf(mainScreenTopY, categoriesTopY, logTopY)
         val minY = topYPositions.minOrNull() ?: 0f
         val maxY = topYPositions.maxOrNull() ?: 0f
         val difference = maxY - minY
@@ -275,6 +275,30 @@ class EdgeToEdgeLayoutTest {
             "All screens should have consistent top bar positioning (difference < 5dp), but difference was $difference",
             difference < 5f * composeTestRule.density.density
         )
+    }
+
+    @Test
+    fun homeIconNavigatesBackToMainScreen() {
+        composeTestRule.waitForIdle()
+
+        // Move to another screen
+        composeTestRule.onNodeWithContentDescription("Timer Settings").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Observe Timer").assertExists()
+
+        // Use the home icon to return
+        composeTestRule.onNodeWithContentDescription("Home").performClick()
+        composeTestRule.waitForIdle()
+
+        // Main screen content should be visible again
+        composeTestRule.onNodeWithText("Personal Notes for AI").assertExists()
+    }
+
+    @Test
+    fun monitoringIndicatorVisibleOnHome() {
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithContentDescription("Monitoring stopped").assertExists()
     }
 }
 

@@ -167,6 +167,10 @@ class MainActivity : ComponentActivity() {
 
                 val navigationActions =
                         NavigationActions(
+                                onGoHome = {
+                                    ApiKeyManager.setFirstBootTutorialShown(context)
+                                    activeScreen = MainScreen.Home
+                                },
                                 onOpenCategories = {
                                     ApiKeyManager.setFirstBootTutorialShown(context)
                                     activeScreen = MainScreen.AppCategories
@@ -243,17 +247,20 @@ class MainActivity : ComponentActivity() {
                                 )
                         MainScreen.AppCategories ->
                                 AppCategoriesScreen(
-                                    navigationActions = navigationActions,
-                                    onNavigateBack = { activeScreen = MainScreen.Home }
+                                        navigationActions = navigationActions,
+                                        monitoringActive = isMonitoringActive,
+                                        onNavigateBack = { activeScreen = MainScreen.Home }
                                 )
                         MainScreen.TimerSettings ->
                                 TimerSettingsScreen(
                                         navigationActions = navigationActions,
+                                        monitoringActive = isMonitoringActive,
                                         onNavigateBack = { activeScreen = MainScreen.Home }
                                 )
                         MainScreen.AILog ->
                                 AILogScreen(
                                         navigationActions = navigationActions,
+                                        monitoringActive = isMonitoringActive,
                                         onNavigateBack = { activeScreen = MainScreen.Home }
                                 )
                         MainScreen.AIConfig ->
@@ -261,6 +268,7 @@ class MainActivity : ComponentActivity() {
                                         topBar = {
                                             AppTopBar(
                                                     title = "AI Configuration",
+                                                    monitoringActive = isMonitoringActive,
                                                     navigationIcon = {
                                                         IconButton(
                                                                 onClick = {
@@ -548,6 +556,7 @@ fun TimeLinterApp(
             topBar = {
                 AppTopBar(
                         title = stringResource(id = R.string.app_name),
+                        monitoringActive = isMonitoring,
                         actions = { TopNavigationMenu(navigationActions) }
                 )
             }

@@ -77,7 +77,11 @@ private data class EditableCategory(
 )
 
 @Composable
-fun AppCategoriesScreen(onNavigateBack: () -> Unit, navigationActions: NavigationActions) {
+fun AppCategoriesScreen(
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
+) {
     val context = LocalContext.current
     val config = remember { AppCategoryConfigManager(context) }
     var categories by remember { mutableStateOf(config.getDisplayCategories()) }
@@ -149,6 +153,7 @@ fun AppCategoriesScreen(onNavigateBack: () -> Unit, navigationActions: Navigatio
         topBar = {
             AppTopBar(
                 title = "App Categories",
+                monitoringActive = monitoringActive,
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

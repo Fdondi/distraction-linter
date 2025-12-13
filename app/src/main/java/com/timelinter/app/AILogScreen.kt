@@ -60,7 +60,8 @@ import com.timelinter.app.ui.components.TopNavigationMenu
 @Composable
 fun AILogScreen(
     onNavigateBack: () -> Unit,
-    navigationActions: NavigationActions
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
 ) {
     val events by EventLogStore.events.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
@@ -118,6 +119,7 @@ fun AILogScreen(
         topBar = {
             com.timelinter.app.ui.components.AppTopBar(
                 title = "AI Log",
+                monitoringActive = monitoringActive,
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

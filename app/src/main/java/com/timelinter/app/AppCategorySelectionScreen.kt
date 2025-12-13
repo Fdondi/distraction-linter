@@ -36,7 +36,8 @@ fun AppCategorySelectionScreen(
     manager: AppCategoryManager,
     showFreeAllowance: Boolean = false,
     onNavigateBack: () -> Unit,
-    navigationActions: NavigationActions
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
 ) {
     val context = LocalContext.current
 
@@ -156,6 +157,7 @@ fun AppCategorySelectionScreen(
         topBar = {
             AppTopBar(
                 title = title,
+                monitoringActive = monitoringActive,
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -366,7 +368,11 @@ private fun AppCategoryListItem(
 
 // Convenience wrappers for backward compatibility
 @Composable
-fun AppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: NavigationActions) {
+fun AppSelectionScreen(
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
+) {
     AppCategorySelectionScreen(
         title = "Time-Wasting Apps",
         selectedSectionLabel = "Selected Time-Wasting Apps",
@@ -375,12 +381,17 @@ fun AppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: Navigation
         manager = AppCategoryManager("time_waster_apps", "TimeWasterAppManager"),
         showFreeAllowance = true,
         onNavigateBack = onNavigateBack,
-        navigationActions = navigationActions
+        navigationActions = navigationActions,
+        monitoringActive = monitoringActive
     )
 }
 
 @Composable
-fun GoodAppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: NavigationActions) {
+fun GoodAppSelectionScreen(
+    onNavigateBack: () -> Unit,
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
+) {
     AppCategorySelectionScreen(
         title = "Good Apps",
         selectedSectionLabel = "Selected Good Apps",
@@ -388,7 +399,8 @@ fun GoodAppSelectionScreen(onNavigateBack: () -> Unit, navigationActions: Naviga
         explanationPlaceholder = "e.g., Helps with productivity, learning, exercise...",
         manager = AppCategoryManager("good_apps", "GoodAppManager"),
         onNavigateBack = onNavigateBack,
-        navigationActions = navigationActions
+        navigationActions = navigationActions,
+        monitoringActive = monitoringActive
     )
 }
 

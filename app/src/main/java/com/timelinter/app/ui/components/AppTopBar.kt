@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hexagon
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 data class NavigationActions(
+    val onGoHome: () -> Unit,
     val onOpenCategories: () -> Unit,
     val onOpenTimers: () -> Unit,
     val onOpenLog: () -> Unit,
@@ -37,6 +39,7 @@ data class NavigationActions(
 fun AppTopBar(
     title: String,
     navigationIcon: (@Composable () -> Unit)? = null,
+    monitoringActive: Boolean? = null,
     actions: (@Composable RowScope.() -> Unit)? = null
 ) {
     Surface(tonalElevation = 2.dp) {
@@ -64,7 +67,24 @@ fun AppTopBar(
                 }
 
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Text(text = title, style = MaterialTheme.typography.titleLarge)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        monitoringActive?.let { isActive ->
+                            val tint =
+                                if (isActive) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                            val statusDescription =
+                                if (isActive) "Monitoring active" else "Monitoring stopped"
+                            Icon(
+                                imageVector = Icons.Default.Hexagon,
+                                contentDescription = statusDescription,
+                                tint = tint
+                            )
+                        }
+                        Text(text = title, style = MaterialTheme.typography.titleLarge)
+                    }
                 }
 
                 // Reserve space symmetrical to navigation area
@@ -85,6 +105,9 @@ fun AppTopBar(
 
 @Composable
 fun TopNavigationMenu(actions: NavigationActions) {
+    IconButton(onClick = actions.onGoHome) {
+        Icon(Icons.Default.Home, contentDescription = "Home")
+    }
     IconButton(onClick = actions.onOpenCategories) {
         Icon(Icons.AutoMirrored.Filled.List, contentDescription = "App Categories")
     }

@@ -40,7 +40,8 @@ import com.timelinter.app.ui.components.TopNavigationMenu
 @Composable
 fun TimerSettingsScreen(
     onNavigateBack: () -> Unit,
-    navigationActions: NavigationActions
+    navigationActions: NavigationActions,
+    monitoringActive: Boolean? = null
 ) {
     val context = LocalContext.current
 
@@ -73,6 +74,7 @@ fun TimerSettingsScreen(
         topBar = {
             com.timelinter.app.ui.components.AppTopBar(
                 title = "Timer Settings",
+                monitoringActive = monitoringActive,
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
