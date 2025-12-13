@@ -4,6 +4,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -62,15 +67,42 @@ object BackendClient {
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string()
             if (!response.isSuccessful) {
+                val parsed = parseError(responseBody)
+                val errorMessage = parsed.message ?: (responseBody ?: "Empty response body")
                 throw BackendHttpException(
                     statusCode = response.code,
-                    message = responseBody ?: "Empty response body"
+                    message = errorMessage,
+                    code = parsed.code
                 )
             }
 
             val bodyString = responseBody ?: throw IOException("Empty response body")
             val generateResponse = json.decodeFromString(GenerateResponse.serializer(), bodyString)
             return generateResponse.result
+        }
+    }
+
+    private data class ParsedError(val code: String?, val message: String?)
+
+    private fun parseError(body: String?): ParsedError {
+        if (body.isNullOrBlank()) return ParsedError(code = null, message = null)
+
+        return try {
+            val element: JsonElement = json.parseToJsonElement(body)
+            val root = element.jsonObject
+            val detail = root["detail"] ?: return ParsedError(code = null, message = null)
+            if (detail is JsonPrimitive) {
+                return ParsedError(code = null, message = detail.contentOrNull)
+            }
+            if (detail is JsonObject) {
+                val code = detail["code"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+                val message = detail["message"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+                    ?: detail["detail"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+                return ParsedError(code = code, message = message)
+            }
+            ParsedError(code = null, message = null)
+        } catch (e: Exception) {
+            ParsedError(code = null, message = null)
         }
     }
 }

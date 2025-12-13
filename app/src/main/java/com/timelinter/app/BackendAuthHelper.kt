@@ -7,7 +7,16 @@ import java.io.IOException
 /**
  * Exception representing an HTTP failure from the backend.
  */
-class BackendHttpException(val statusCode: Int, message: String) : IOException(message)
+class BackendHttpException(
+    val statusCode: Int,
+    message: String,
+    val code: String? = null,
+) : IOException(message)
+
+object BackendAccessCode {
+    const val PENDING_APPROVAL = "PENDING_APPROVAL"
+    const val ACCESS_REFUSED = "ACCESS_REFUSED"
+}
 
 /**
  * Exception representing an authentication/refresh failure when talking to the backend.

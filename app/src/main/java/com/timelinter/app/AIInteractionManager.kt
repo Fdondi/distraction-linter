@@ -143,7 +143,7 @@ class AIInteractionManager(
                 )
              } catch (e: BackendHttpException) {
                  Log.e(tag, "Backend HTTP error", e)
-                 ParsedResponse(userMessage = "(Backend Error: HTTP ${e.statusCode})", tools = emptyList())
+                 return mapBackendHttpError(e)
              } catch (e: Exception) {
                  Log.e(tag, "Backend error", e)
                  ParsedResponse(userMessage = "(Backend Error: ${e.message})", tools = emptyList())
@@ -194,6 +194,9 @@ class AIInteractionManager(
                      prompt = null,
                  )
                  ParsedResponse(userMessage = resultText, tools = emptyList())
+            } catch (e: BackendHttpException) {
+                Log.e(tag, "Backend HTTP error (custom contents)", e)
+                mapBackendHttpError(e)
              } catch (e: Exception) {
                  Log.e(tag, "Backend error (custom contents)", e)
                  null
@@ -208,5 +211,33 @@ class AIInteractionManager(
                  null
              }
          }
+    }
+
+    companion object {
+        fun mapBackendHttpError(e: BackendHttpException): ParsedResponse {
+            if (e.statusCode == 403) {
+                when (e.code) {
+                    BackendAccessCode.PENDING_APPROVAL -> {
+                        return ParsedResponse(
+                            userMessage = "Your account is pending approval. Please wait until it is activated.",
+                            tools = emptyList(),
+                            authExpired = false,
+                        )
+                    }
+                    BackendAccessCode.ACCESS_REFUSED -> {
+                        return ParsedResponse(
+                            userMessage = "Access has been refused for this account. Please contact support if you believe this is an error.",
+                            tools = emptyList(),
+                            authExpired = false,
+                        )
+                    }
+                }
+            }
+            return ParsedResponse(
+                userMessage = "(Backend Error: HTTP ${e.statusCode})",
+                tools = emptyList(),
+                authExpired = false,
+            )
+        }
     }
 }

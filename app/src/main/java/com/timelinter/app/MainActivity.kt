@@ -209,6 +209,7 @@ class MainActivity : ComponentActivity() {
                                         hasBackendToken = hasBackendToken,
                                         isSigningIn = isSigningIn,
                                         onToggleMonitoring = { attemptStartMonitoring() },
+                                        onLogout = { logout() },
                                         showUsageAccessDialog = showUsageAccessDialog,
                                         onDismissUsageAccessDialog = { showUsageAccessDialog = false },
                                         onGoToUsageAccessSettings = { openUsageAccessSettings() },
@@ -338,6 +339,14 @@ class MainActivity : ComponentActivity() {
     private fun clearGoogleSignIn() {
         ApiKeyManager.clearGoogleIdToken(this)
         hasBackendToken = false
+    }
+
+    private fun logout() {
+        if (isMonitoringActive) {
+            stopMonitoringService()
+            isMonitoringActive = false
+        }
+        clearGoogleSignIn()
     }
 
     private fun attemptStartMonitoring() {
@@ -519,6 +528,7 @@ fun TimeLinterApp(
         hasBackendToken: Boolean,
         isSigningIn: Boolean,
         onToggleMonitoring: () -> Unit,
+        onLogout: () -> Unit,
         showUsageAccessDialog: Boolean,
         onDismissUsageAccessDialog: () -> Unit,
         onGoToUsageAccessSettings: () -> Unit,
@@ -714,30 +724,45 @@ fun TimeLinterApp(
             // --- Status recap section ---
             Spacer(modifier = Modifier.height(16.dp))
 
-            val statusText: String
-            val backgroundColor: Color
-            val textColor: Color
+        val statusText: String
+        val backgroundColor: Color
+        val textColor: Color
+        val showActionButtonInStatus: Boolean
+        val statusActionLabel: String
+        val statusActionColor: Color
 
             when {
                 aiMode == SettingsManager.AI_MODE_BACKEND && !hasBackendToken -> {
-                    statusText = "Please sign in with Google above."
+                statusText = ""
                     backgroundColor = MaterialTheme.colorScheme.surfaceVariant
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                showActionButtonInStatus = true
+                statusActionLabel = "Start Monitoring"
+                statusActionColor = MaterialTheme.colorScheme.primary
                 }
                 aiMode == SettingsManager.AI_MODE_DIRECT && !apiKeyPresent -> {
-                    statusText = "Please enter your API Key above."
+                statusText = ""
                     backgroundColor = MaterialTheme.colorScheme.surfaceVariant
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                showActionButtonInStatus = true
+                statusActionLabel = "Start Monitoring"
+                statusActionColor = MaterialTheme.colorScheme.primary
                 }
                 isMonitoring -> {
-                    statusText = "Monitoring active..."
+                statusText = ""
                     backgroundColor = MaterialTheme.colorScheme.primaryContainer
                     textColor = MaterialTheme.colorScheme.onPrimaryContainer
+                showActionButtonInStatus = true
+                statusActionLabel = "Stop Monitoring"
+                statusActionColor = MaterialTheme.colorScheme.error
                 }
                 else -> {
-                    statusText = "Monitoring stopped."
-                    backgroundColor = MaterialTheme.colorScheme.errorContainer
-                    textColor = MaterialTheme.colorScheme.onErrorContainer
+                statusText = ""
+                backgroundColor = MaterialTheme.colorScheme.errorContainer
+                textColor = MaterialTheme.colorScheme.onErrorContainer
+                showActionButtonInStatus = true
+                statusActionLabel = "Start Monitoring"
+                statusActionColor = MaterialTheme.colorScheme.primary
                 }
             }
 
@@ -748,11 +773,24 @@ fun TimeLinterApp(
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center
             ) {
-                Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = textColor
-                )
+                if (showActionButtonInStatus) {
+                    Button(
+                            onClick = onToggleMonitoring,
+                            enabled = credentialsReady,
+                            colors =
+                                    ButtonDefaults.buttonColors(
+                                            containerColor = statusActionColor
+                                    )
+                    ) {
+                        Text(statusActionLabel)
+                    }
+                } else {
+                    Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = textColor
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -774,16 +812,28 @@ fun TimeLinterApp(
             ) { Text("Save Notes") }
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                    onClick = onToggleMonitoring,
-                    enabled = credentialsReady,
-                    colors =
-                            ButtonDefaults.buttonColors(
-                                    containerColor =
-                                            if (isMonitoring) MaterialTheme.colorScheme.error
-                                            else MaterialTheme.colorScheme.primary
-                            )
-            ) { Text(if (isMonitoring) "Stop Monitoring" else "Start Monitoring") }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+            ) {
+                Button(
+                        onClick = onLogout,
+                        enabled = apiKeyPresent || hasBackendToken,
+                        colors =
+                                ButtonDefaults.buttonColors(
+                                        containerColor =
+                                                if (apiKeyPresent || hasBackendToken) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.surfaceVariant
+                                                }
+                                )
+                ) {
+                    Text("Logout")
+                }
+            }
 
             // Dialog for Usage Access Permission
             if (showUsageAccessDialog) {
