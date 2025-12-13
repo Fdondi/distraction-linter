@@ -31,7 +31,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -116,6 +115,7 @@ class AppUsageMonitorService : Service() {
     private var currentAppSessionStart: Instant = timeProvider.now() // Track when current app session started
     private lateinit var categoryConfigManager: AppCategoryConfigManager
     private lateinit var allowanceTracker: CategoryAllowanceTracker
+    private lateinit var appContinuityManager: AppContinuityManager
 
     // Unified token bucket - owns its own state
     private lateinit var tokenBucket: TokenBucket
@@ -201,6 +201,11 @@ class AppUsageMonitorService : Service() {
 
         // Initialize token bucket - it will handle its own state
         tokenBucket = TokenBucket(this, timeProvider)
+        appContinuityManager = AppContinuityManager(
+            timeProvider = timeProvider,
+            noAppGapDurationProvider = { SettingsManager.getNoAppGapDuration(this) },
+            freeBucketResumeDurationProvider = { SettingsManager.getFreeBucketResumeDuration(this) }
+        )
         EventLogStore.setContextLineProvider { buildLogContextLine() }
 
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
@@ -344,17 +349,9 @@ class AppUsageMonitorService : Service() {
         
         // Get current app usage
         val detectedInfo = getCurrentAppUsage()
-        // Probabilistic fallback: if detection is empty, 75% chance keep previous app, 25% clear it
-        // This handles transient empty detections while eventually clearing truly idle states
-        val effectiveInfo = detectedInfo ?: run {
-            if (Random().nextInt(4) == 0) {
-                // 1 in 4 chance: clear the app
-                null
-            } else {
-                // 3 in 4 chance: keep previous app
-                getAppInfoFromCurrentApp()
-            }
-        }
+        val activeInfo = getAppInfoFromCurrentApp()
+        val activeIsFree = activeInfo?.packageName?.let { allowanceTracker.isInFreeWindow(it, timeProvider.now()) } == true
+        val effectiveInfo = appContinuityManager.resolve(activeInfo, detectedInfo, activeIsFree)
         updateTimeTracking(effectiveInfo)
         
         val stateName = interactionStateManager.getStateName()
@@ -377,7 +374,7 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    private fun handleObservingState(appInfo: AppInfo?) {
+    private fun handleObservingState(appInfo: ForegroundAppInfo?) {
         // Step 0-1 from interaction.md
         
         val isWasteful = appInfo?.category?.let { isDrainingCategory(it) } == true
@@ -403,7 +400,7 @@ class AppUsageMonitorService : Service() {
         generateAIResponse(appInfo, AITask.FIRST_MESSAGE)
     }
 
-    private fun handleConversationActiveState(appInfo: AppInfo?) {
+    private fun handleConversationActiveState(appInfo: ForegroundAppInfo?) {
         // Check if user moved away from draining apps
         if (appInfo?.category?.let { isDrainingCategory(it) } != true) {
             Log.i(TAG, "User moved away from draining apps, resetting to observing")
@@ -416,7 +413,7 @@ class AppUsageMonitorService : Service() {
         Log.v(TAG, "Conversation active, waiting for user interaction")
     }
 
-    private fun handleWaitingForResponseState(appInfo: AppInfo?) {
+    private fun handleWaitingForResponseState(appInfo: ForegroundAppInfo?) {
         // Step 6a/6b from interaction.md
         
         // Check if user moved away from draining apps
@@ -448,7 +445,7 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    private fun generateAIResponse(appInfo: AppInfo?, task: AITask) {
+    private fun generateAIResponse(appInfo: ForegroundAppInfo?, task: AITask) {
         serviceScope.launch {
             try {
                 Log.d(TAG, "Sending to AI using task: ${task.displayName}")
@@ -554,20 +551,14 @@ class AppUsageMonitorService : Service() {
         }
     }
 
-    private data class AppInfo(
-        val packageName: String,
-        val readableName: String,
-        val category: ResolvedCategory
-    )
-
-    private fun getAppInfoFromCurrentApp(): AppInfo? {
+    private fun getAppInfoFromCurrentApp(): ForegroundAppInfo? {
         val pkg = currentApp.takeIf { it.isNotEmpty() } ?: return null
         val readable = getReadableAppName(pkg)
         val category = categoryConfigManager.resolveCategory(pkg)
-        return AppInfo(packageName = pkg, readableName = readable, category = category)
+        return ForegroundAppInfo(packageName = pkg, readableName = readable, category = category)
     }
 
-    private fun getCurrentAppUsage(): AppInfo? {
+    private fun getCurrentAppUsage(): ForegroundAppInfo? {
         val usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
         val beginTime = endTime - 1000 * 60 * 1 // 1 minute
@@ -664,7 +655,7 @@ class AppUsageMonitorService : Service() {
                     "Detected app: $currentForegroundApp ($readableName) - Category: ${resolvedCategory.id}, draining=$isDraining, rewarding=$isRewarding"
                 )
                 
-                return AppInfo(
+                return ForegroundAppInfo(
                     packageName = currentForegroundApp,
                     readableName = readableName,
                     category = resolvedCategory
@@ -680,7 +671,7 @@ class AppUsageMonitorService : Service() {
         return null
     }
 
-    private fun updateTimeTracking(appInfo: AppInfo?) {
+    private fun updateTimeTracking(appInfo: ForegroundAppInfo?) {
         val now = timeProvider.now()
         val detectedApp = appInfo?.packageName ?: ""
         val category = appInfo?.category ?: neutralCategory()
@@ -763,7 +754,7 @@ class AppUsageMonitorService : Service() {
         wasPreviouslyWasteful = isCurrentlyDraining
     }
 
-    private fun tryArchiveMemoriesThenClear(appInfo: AppInfo?) {
+    private fun tryArchiveMemoriesThenClear(appInfo: ForegroundAppInfo?) {
         // No explicit check for model initialization; aiManager handles it
         // and returns null/error if not ready.
 

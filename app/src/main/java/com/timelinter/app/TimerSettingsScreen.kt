@@ -63,6 +63,8 @@ fun TimerSettingsScreen(
         )
     }
     val wakeupInterval: Duration = sliderToDuration(wakeupSlider, wakeupMin, wakeupMax)
+    var noAppGapDuration by remember { mutableStateOf(SettingsManager.getNoAppGapDuration(context)) }
+    var freeBucketResume by remember { mutableStateOf(SettingsManager.getFreeBucketResumeDuration(context)) }
     
     // Good Apps settings
     var maxOverfill by remember { mutableStateOf(SettingsManager.getMaxOverfill(context)) }
@@ -144,6 +146,29 @@ fun TimerSettingsScreen(
                 SettingsManager.setReplenishRateFraction(context, fraction)
             }
 
+            // Detection lapse protections
+            LinearDurationCard(
+                title = "No-App Lapse Tolerance",
+                description = "Keep the last app if detection briefly drops to no app.",
+                value = noAppGapDuration,
+                valueRangeMinutes = 0f..5f,
+                steps = 5
+            ) { value ->
+                noAppGapDuration = value
+                SettingsManager.setNoAppGapDuration(context, value)
+            }
+
+            LinearDurationCard(
+                title = "Free Bucket Resume Window",
+                description = "How long to ignore short switches while a free window is active.",
+                value = freeBucketResume,
+                valueRangeMinutes = 1f..30f,
+                steps = 29
+            ) { value ->
+                freeBucketResume = value
+                SettingsManager.setFreeBucketResumeDuration(context, value)
+            }
+
             // Divider and Good Apps section
             MaterialDivider(modifier = Modifier.padding(vertical = 16.dp))
             
@@ -190,6 +215,8 @@ fun TimerSettingsScreen(
                                 "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up." +
                                 "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)." +
                                 "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps." +
+                                "• No-App Lapse Tolerance: How long we keep the last app when detection briefly disappears." +
+                                "• Free Bucket Resume Window: How long we stick to the free-time app before accepting a switch." +
                                 " Unified Bucket System:" +
                                 "• Neutral App Fill Rate: How fast neutral apps fill your bucket." +
                                 "• Max Overfill: Maximum extra time you can store beyond your normal limit." +

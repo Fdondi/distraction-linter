@@ -14,11 +14,15 @@ object SettingsManager {
     private const val OBSERVE_TIMER_MINUTES_KEY = "observe_timer_minutes"
     private const val RESPONSE_TIMER_MINUTES_KEY = "response_timer_minutes"
     private const val WAKEUP_INTERVAL_SECONDS_KEY = "wakeup_interval_seconds"
+    private const val NO_APP_GAP_MINUTES_KEY = "no_app_gap_minutes"
+    private const val FREE_BUCKET_RESUME_MINUTES_KEY = "free_bucket_resume_minutes"
     
     // Default values
     private const val DEFAULT_OBSERVE_TIMER_MINUTES = 5
     private const val DEFAULT_RESPONSE_TIMER_MINUTES = 1
     private const val DEFAULT_WAKEUP_INTERVAL_SECONDS = 30L
+    private const val DEFAULT_NO_APP_GAP_MINUTES = 2
+    private const val DEFAULT_FREE_BUCKET_RESUME_MINUTES = 10
 
     // Threshold bucket settings
     private const val MAX_THRESHOLD_MINUTES_KEY = "max_threshold_minutes"
@@ -93,6 +97,26 @@ object SettingsManager {
                 clamped.inWholeSeconds
             )
         }
+    }
+
+    fun getNoAppGapDuration(context: Context): Duration {
+        val minutes = getPreferences(context).getInt(NO_APP_GAP_MINUTES_KEY, DEFAULT_NO_APP_GAP_MINUTES)
+        return minutes.coerceAtLeast(0).minutes
+    }
+
+    fun setNoAppGapDuration(context: Context, duration: Duration) {
+        val clamped = duration.inWholeMinutes.toInt().coerceAtLeast(0)
+        getPreferences(context).edit { putInt(NO_APP_GAP_MINUTES_KEY, clamped) }
+    }
+
+    fun getFreeBucketResumeDuration(context: Context): Duration {
+        val minutes = getPreferences(context).getInt(FREE_BUCKET_RESUME_MINUTES_KEY, DEFAULT_FREE_BUCKET_RESUME_MINUTES)
+        return minutes.coerceAtLeast(0).minutes
+    }
+
+    fun setFreeBucketResumeDuration(context: Context, duration: Duration) {
+        val clamped = duration.inWholeMinutes.toInt().coerceAtLeast(0)
+        getPreferences(context).edit { putInt(FREE_BUCKET_RESUME_MINUTES_KEY, clamped) }
     }
 
     fun getResponseTimer(context: Context): Duration {
