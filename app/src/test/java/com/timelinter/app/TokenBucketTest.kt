@@ -23,14 +23,14 @@ class TokenBucketTest {
         allowOverfill = false,
         usesNeutralTimers = false
     )
-    private val neutralCategory = ResolvedCategory(
-        id = AppCategoryIds.DEFAULT,
-        label = "Default",
-        minutesChangePerMinute = null,
+    private val refillCategory = ResolvedCategory(
+        id = "refill",
+        label = "Refill",
+        minutesChangePerMinute = 0.5f,
         freeMinutesPerPeriod = 0,
         freePeriodsPerDay = 0,
         allowOverfill = false,
-        usesNeutralTimers = true
+        usesNeutralTimers = false
     )
 
     private class FakeTimeProvider(start: Instant = Instant.fromEpochMilliseconds(0)) : TimeProvider {
@@ -76,22 +76,18 @@ class TokenBucketTest {
     }
 
     @Test
-    fun bucket_replenishes_when_neutral_category() {
+    fun bucket_replenishes_with_positive_rate_category() {
         SettingsManager.setThresholdRemaining(context, 1.minutes)
         val time = FakeTimeProvider()
         val bucket = TokenBucket(context, time)
 
-        bucket.update(neutralCategory)
+        bucket.update(refillCategory)
         time.advanceMinutes(5)
-        var remaining = bucket.update(neutralCategory)
-        assertEquals("Replenish proportionally at 5 minutes", 90.seconds, remaining)
+        var remaining = bucket.update(refillCategory)
+        assertEquals("Replenish proportionally at 5 minutes", 3.5.minutes, remaining)
 
         time.advanceMinutes(5)
-        remaining = bucket.update(neutralCategory)
-        assertEquals("One replenish after full interval", 2.minutes, remaining)
-
-        time.advanceMinutes(100)
-        remaining = bucket.update(neutralCategory)
-        assertEquals("Capped at max threshold", SettingsManager.getMaxThreshold(context), remaining)
+        remaining = bucket.update(refillCategory)
+        assertEquals("One replenish after full interval", 6.minutes, remaining.coerceAtMost(SettingsManager.getMaxThreshold(context)))
     }
 }

@@ -29,16 +29,5 @@ class SettingsManagerTest {
         assertEquals(2.minutes, SettingsManager.getWakeupInterval(context))
     }
 
-    @Test
-    fun replenishRateFraction_defaults() {
-        assertEquals(0.1f, SettingsManager.getReplenishRateFraction(context), 0.0001f)
-    }
-
-    @Test
-    fun setReplenishRateFraction_stores() {
-        SettingsManager.setReplenishRateFraction(context, 0.2f)
-
-        assertEquals(0.2f, SettingsManager.getReplenishRateFraction(context), 0.0001f)
-    }
 }
 

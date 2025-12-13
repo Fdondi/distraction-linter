@@ -48,17 +48,16 @@ fun TimerSettingsScreen(
     val responseMin = 10.seconds
     val responseMax = 10.minutes
     var responseSlider by remember {
-        mutableStateOf<Float>(
+        mutableFloatStateOf(
             durationToSlider(SettingsManager.getResponseTimer(context), responseMin, responseMax)
         )
     }
     val responseDuration: Duration = sliderToDuration(responseSlider, responseMin, responseMax)
     var maxThreshold by remember { mutableStateOf(SettingsManager.getMaxThreshold(context)) }
-    var replenishRateFraction by remember { mutableFloatStateOf(SettingsManager.getReplenishRateFraction(context)) }
     val wakeupMin = 10.seconds
     val wakeupMax = 10.minutes
     var wakeupSlider by remember {
-        mutableStateOf<Float>(
+        mutableFloatStateOf(
             durationToSlider(SettingsManager.getWakeupInterval(context), wakeupMin, wakeupMax)
         )
     }
@@ -133,18 +132,13 @@ fun TimerSettingsScreen(
                 SettingsManager.setMaxThreshold(context, maxThreshold)
             }
 
-            // Replenish Rate Setting
-            LinearDurationCard(
-                title = "Replenish Rate",
-                description = "Fraction of an hour restored when off wasteful apps (0.1 = 6 min/hour)",
-                value = (replenishRateFraction * 60.0).minutes,
-                valueRangeMinutes = 0f..120f,
-                steps = 120
-            ) { value ->
-                val fraction = (value.inWholeSeconds.toFloat() / 3600f).coerceIn(0f, 2f)
-                replenishRateFraction = fraction
-                SettingsManager.setReplenishRateFraction(context, fraction)
-            }
+            MaterialDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+            Text(
+                text = "Gap handling",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
 
             // Detection lapse protections
             LinearDurationCard(
@@ -169,11 +163,10 @@ fun TimerSettingsScreen(
                 SettingsManager.setFreeBucketResumeDuration(context, value)
             }
 
-            // Divider and Good Apps section
             MaterialDivider(modifier = Modifier.padding(vertical = 16.dp))
             
             Text(
-                text = "Good Apps Rewards",
+                text = "Overfill handling",
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
@@ -214,11 +207,9 @@ fun TimerSettingsScreen(
                         text = "• Wakeup Interval: How often the service wakes up to check the current app (log scaled 10s–10m)." +
                                 "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up." +
                                 "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size)." +
-                                "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps." +
                                 "• No-App Lapse Tolerance: How long we keep the last app when detection briefly disappears." +
                                 "• Free Bucket Resume Window: How long we stick to the free-time app before accepting a switch." +
                                 " Unified Bucket System:" +
-                                "• Neutral App Fill Rate: How fast neutral apps fill your bucket." +
                                 "• Max Overfill: Maximum extra time you can store beyond your normal limit." +
                                 "• Decay Rate: How fast overfill decays when not using rewarding apps.",
                         style = MaterialTheme.typography.bodySmall,

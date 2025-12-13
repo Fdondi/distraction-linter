@@ -8,7 +8,6 @@ import kotlin.time.Instant
 data class TokenBucketConfig(
     val context: Context,
     val maxThreshold: Duration,
-    val replenishRateFraction: Float,
     val maxOverfill: Duration = Duration.ZERO,
     val overfillDecayPerHour: Duration = Duration.ZERO
 )
@@ -58,12 +57,14 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         lastUpdate = now
         
         val newRemaining = when {
-            resolvedCategory.usesNeutralTimers || resolvedCategory.minutesChangePerMinute == null ->
+            resolvedCategory.minutesChangePerMinute == null ->
                 updateNeutral(currentRemaining, delta, config)
-            resolvedCategory.minutesChangePerMinute > 0 ->
+            resolvedCategory.minutesChangePerMinute > 0f ->
                 applyDirectChange(currentRemaining, delta, resolvedCategory.minutesChangePerMinute, config, resolvedCategory.allowOverfill)
-            else ->
+            resolvedCategory.minutesChangePerMinute < 0f ->
                 applyDirectChange(currentRemaining, delta, resolvedCategory.minutesChangePerMinute, config, allowOverfill = false)
+            else ->
+                updateNeutral(currentRemaining, delta, config)
         }
         val clampedRemaining = clampWithOverfill(newRemaining, config, resolvedCategory.allowOverfill)
         
@@ -77,7 +78,6 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         return TokenBucketConfig(
             context = context,
             maxThreshold = SettingsManager.getMaxThreshold(context),
-            replenishRateFraction = SettingsManager.getReplenishRateFraction(context),
             maxOverfill = SettingsManager.getMaxOverfill(context),
             overfillDecayPerHour = SettingsManager.getOverfillDecayPerHour(context)
         )
@@ -95,19 +95,7 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
     private fun updateNeutral(currentRemaining: Duration, delta: Duration, config: TokenBucketConfig): Duration {
         if (delta <= Duration.ZERO) return currentRemaining
 
-        // Refill when below max using neutral multiplier
-        if (currentRemaining < config.maxThreshold) {
-            val neutralMultiplier = SettingsManager.getNeutralAppFillRateMultiplier(config.context)
-            if (config.replenishRateFraction <= 0f || neutralMultiplier <= 0f) {
-                return currentRemaining
-            }
-            val hoursElapsed = delta.inWholeSeconds.toDouble() / 3600.0
-            val replenishmentMinutes = config.replenishRateFraction * 60.0 * neutralMultiplier * hoursElapsed
-            val actualReplenishment = replenishmentMinutes.minutes
-            return minOf(config.maxThreshold, currentRemaining + actualReplenishment)
-        }
-
-        // Decay overfill if present
+        // No refill; only decay overfill if any
         if (currentRemaining <= config.maxThreshold) {
             return currentRemaining
         }

@@ -30,7 +30,6 @@ class TokenBucketCategoryBehaviorTest {
             .commit()
 
         SettingsManager.setMaxThreshold(context, 5.minutes)
-        SettingsManager.setReplenishRateFraction(context, 0.1f)
         SettingsManager.setThresholdRemaining(context, 5.minutes)
         SettingsManager.setMaxOverfill(context, 15.minutes)
     }

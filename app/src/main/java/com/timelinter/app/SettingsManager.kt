@@ -27,11 +27,9 @@ object SettingsManager {
     // Threshold bucket settings
     private const val MAX_THRESHOLD_MINUTES_KEY = "max_threshold_minutes"
     private const val THRESHOLD_REMAINING_MS_KEY = "threshold_remaining_ms"           // Internal token bucket storage (ms)
-    private const val REPLENISH_RATE_FRACTION_KEY = "replenish_rate_fraction"
 
     // Defaults
     private const val DEFAULT_MAX_THRESHOLD_MINUTES = 5
-    private const val DEFAULT_REPLENISH_RATE_FRACTION = 0.1f // 6 minutes per hour (dimensionless fraction of an hour)
 
     // Good Apps settings keys
     private const val MAX_OVERFILL_MINUTES_KEY = "max_overfill_minutes"
@@ -136,17 +134,6 @@ object SettingsManager {
      * Replenish rate expressed as a dimensionless fraction of an hour.
      * Example: 6 minutes/hour = 0.1.
      */
-    fun getReplenishRateFraction(context: Context): Float {
-        return getPreferences(context)
-            .getFloat(REPLENISH_RATE_FRACTION_KEY, DEFAULT_REPLENISH_RATE_FRACTION)
-            .coerceAtLeast(0f)
-    }
-
-    fun setReplenishRateFraction(context: Context, fraction: Float) {
-        val clamped = fraction.coerceAtLeast(0f)
-        getPreferences(context).edit { putFloat(REPLENISH_RATE_FRACTION_KEY, clamped) }
-    }
-
     /* =========================  Threshold Settings  ========================= */
 
     fun getMaxThreshold(context: Context): Duration {

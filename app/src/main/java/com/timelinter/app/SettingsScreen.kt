@@ -47,6 +47,7 @@ import kotlin.time.Duration.Companion.minutes
 
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -60,13 +61,13 @@ fun SettingsScreen(
     var selectedApps by remember { mutableStateOf(setOf<String>()) }
     var allApps by remember { mutableStateOf(listOf<AppInfo>()) }
     var showPermissionDialog by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     // Timer settings
     val responseMin = 10.seconds
     val responseMax = 10.minutes
     var responseSlider by remember {
-        mutableStateOf<Float>(
+        mutableFloatStateOf(
             durationToSlider(SettingsManager.getResponseTimer(context), responseMin, responseMax)
         )
     }
@@ -74,7 +75,7 @@ fun SettingsScreen(
     val wakeupMin = 10.seconds
     val wakeupMax = 10.minutes
     var wakeupSlider by remember {
-        mutableStateOf<Float>(
+        mutableFloatStateOf(
             durationToSlider(SettingsManager.getWakeupInterval(context), wakeupMin, wakeupMax)
         )
     }
@@ -108,34 +109,19 @@ fun SettingsScreen(
 
         val packageManager = context.packageManager
         val installedApps = try {
-            // For Android 11+ (API 30+), we need to use queryIntentActivities
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val mainIntent = Intent(Intent.ACTION_MAIN, null)
-                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-                packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
-                    .map { resolveInfo ->
-                        val appName = resolveInfo.loadLabel(packageManager).toString()
-                        val packageName = resolveInfo.activityInfo.packageName
-                        Log.d("SettingsScreen", "Found app: $appName ($packageName)")
-                        AppInfo(
-                            packageName = packageName,
-                            appName = appName,
-                            isSelected = false
-                        )
-                    }
-            } else {
-                // For older versions, we can use getInstalledApplications
-                packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-                    .map { app ->
-                        val appName = packageManager.getApplicationLabel(app).toString()
-                        Log.d("SettingsScreen", "Found app: $appName (${app.packageName})")
-                        AppInfo(
-                            packageName = app.packageName,
-                            appName = appName,
-                            isSelected = false
-                        )
-                    }
-            }
+            val mainIntent = Intent(Intent.ACTION_MAIN, null)
+            mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
+            packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
+                .map { resolveInfo ->
+                    val appName = resolveInfo.loadLabel(packageManager).toString()
+                    val packageName = resolveInfo.activityInfo.packageName
+                    Log.d("SettingsScreen", "Found app: $appName ($packageName)")
+                    AppInfo(
+                        packageName = packageName,
+                        appName = appName,
+                        isSelected = false
+                    )
+                }
         } catch (e: Exception) {
             Log.e("SettingsScreen", "Error loading apps", e)
             emptyList()
@@ -376,47 +362,6 @@ fun SettingsScreen(
                             }
                         }
 
-                        // Replenish Rate Setting (dimensionless fraction of an hour)
-                        Card(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                var replenishRateFraction by remember {
-                                    mutableFloatStateOf(SettingsManager.getReplenishRateFraction(context))
-                                }
-                                val displayMinutesPerHour = (replenishRateFraction * 60f).roundToInt()
-                                Text(
-                                    text = "Replenish Rate",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "Fraction of an hour restored when off wasteful apps (e.g., 0.1 = 6 min/hour)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text(String.format("%.2f (≈%d min/hour)", replenishRateFraction, displayMinutesPerHour))
-                                    Slider(
-                                        value = replenishRateFraction,
-                                        onValueChange = { value ->
-                                            val clamped = value.coerceIn(0f, 2f) // allow up to 120 min/hour if desired
-                                            replenishRateFraction = clamped
-                                            SettingsManager.setReplenishRateFraction(context, clamped)
-                                        },
-                                        valueRange = 0f..2f,
-                                        steps = 200,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
-
                         // Information Card
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -435,8 +380,7 @@ fun SettingsScreen(
                                 Text(
                                     text = "• Wakeup Interval: How often the service wakes up to check the current app (log scaled 10s–10m).\n" +
                                             "• Response Timer: When Time Linter sends you a message, it waits this long for your reply before sending a follow-up.\n" +
-                                            "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size).\n" +
-                                            "• Replenish Rate: How many minutes are restored per hour you stay off wasteful apps.",
+                                            "• Max Allowed Minutes: The total time you can spend in wasteful apps before intervention (bucket size).",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

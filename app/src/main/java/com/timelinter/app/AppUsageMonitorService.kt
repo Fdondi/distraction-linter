@@ -138,12 +138,7 @@ class AppUsageMonitorService : Service() {
         category.minutesChangePerMinute?.let { it > 0f } == true
 
     private fun categoryEmoji(category: ResolvedCategory): String {
-        if (category.emoji.isNotBlank()) return category.emoji
-        return when {
-            isDrainingCategory(category) -> "💀"
-            isRewardCategory(category) -> "🌸"
-            else -> "⏸"
-        }
+        return category.emoji
     }
 
     // Coroutine scope for background tasks like API calls
