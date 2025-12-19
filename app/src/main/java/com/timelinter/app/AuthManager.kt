@@ -19,13 +19,14 @@ object AuthManager {
     // Web Client ID used for Google Sign-In; must match the backend configuration.
     private const val WEB_CLIENT_ID = "834588824353-dmcktqcifmgaovhfr0b37bdejjdq7lbn.apps.googleusercontent.com" 
 
-    suspend fun signIn(context: Context): String? {
+    suspend fun signIn(context: Context, forceAccountPicker: Boolean = false): String? {
         val credentialManager = CredentialManager.create(context)
 
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(WEB_CLIENT_ID)
-            .setAutoSelectEnabled(true)
+            // Disable auto-select when explicitly switching accounts
+            .setAutoSelectEnabled(!forceAccountPicker)
             .build()
 
         val request = GetCredentialRequest.Builder()

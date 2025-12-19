@@ -93,4 +93,24 @@ class ScreenUnlockBehaviorTest {
         val wastefulRemaining = bucket.update(wastefulCategory)
         assertTrue("Wasteful app should reduce remaining time", wastefulRemaining <= beforeWasteful)
     }
+
+    @Test
+    fun bucketRefillsAfterRestartWhenIdleTimeElapsed() {
+        SettingsManager.setThresholdRemaining(context, 0.minutes)
+        val startInstant = Instant.fromEpochMilliseconds(0)
+        val firstTime = FakeTimeProvider(startInstant)
+        val firstBucket = TokenBucket(context, firstTime)
+
+        // Initial update persists lastUpdate so a later instance can compute the gap.
+        firstBucket.update(neutralCategory)
+        firstBucket.persistCurrentState()
+
+        // Simulate service being recreated much later (2 hours idle).
+        val laterInstant = Instant.fromEpochMilliseconds(120.minutes.inWholeMilliseconds)
+        val laterTime = FakeTimeProvider(laterInstant)
+        val restartedBucket = TokenBucket(context, laterTime)
+
+        val remaining = restartedBucket.update(neutralCategory)
+        assertEquals(SettingsManager.getMaxThreshold(context), remaining)
+    }
 }

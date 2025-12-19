@@ -9,7 +9,9 @@ data class TokenBucketConfig(
     val context: Context,
     val maxThreshold: Duration,
     val maxOverfill: Duration = Duration.ZERO,
-    val overfillDecayPerHour: Duration = Duration.ZERO
+    val overfillDecayPerHour: Duration = Duration.ZERO,
+    val replenishRateFraction: Float = 0f,
+    val neutralFillRateMultiplier: Float = 1f
 )
 
 @OptIn(kotlin.time.ExperimentalTime::class)
@@ -24,6 +26,9 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         val maxThreshold = SettingsManager.getMaxThreshold(context)
         val persistedRemaining = SettingsManager.getThresholdRemaining(context, maxThreshold)
         currentRemaining = persistedRemaining
+        val persistedLast = SettingsManager.getThresholdLastUpdated(context, timeProvider.now())
+        // Guard against clock skew; never allow a future last-update to produce negative deltas.
+        lastUpdate = minOf(persistedLast, timeProvider.now())
     }
 
     fun getCurrentRemaining(): Duration = currentRemaining
@@ -43,13 +48,13 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
 
         // Calculate delta based on current state transition
         // If state changed, reset the time tracking to avoid counting time from previous state
-        val delta = if (lastCategoryId != resolvedCategory.id) {
-            // State changed - only count time from now, not from last update
-            // This prevents deducting time that was spent in a different state
-            Duration.ZERO
-        } else {
-            // Same state - count time since last update
+        val delta = if (lastCategoryId == resolvedCategory.id || resolvedCategory.usesNeutralTimers) {
+            // When staying in the same category, or when switching into a neutral/default category,
+            // count the elapsed time so replenishment can occur after idle periods.
             now - lastUpdate
+        } else {
+            // State changed to a non-neutral category - avoid counting time spent in the previous state.
+            Duration.ZERO
         }
         
         // Update tracking
@@ -68,8 +73,9 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
         }
         val clampedRemaining = clampWithOverfill(newRemaining, config, resolvedCategory.allowOverfill)
         
-        // Actually update the stored state
+        // Actually update the stored state and persist so crashes/restarts recover correctly.
         currentRemaining = clampedRemaining
+        persistState(now, clampedRemaining)
         
         return clampedRemaining
     }
@@ -79,7 +85,9 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
             context = context,
             maxThreshold = SettingsManager.getMaxThreshold(context),
             maxOverfill = SettingsManager.getMaxOverfill(context),
-            overfillDecayPerHour = SettingsManager.getOverfillDecayPerHour(context)
+            overfillDecayPerHour = SettingsManager.getOverfillDecayPerHour(context),
+            replenishRateFraction = SettingsManager.getReplenishRateFraction(context),
+            neutralFillRateMultiplier = SettingsManager.getNeutralAppFillRateMultiplier(context)
         )
     }
 
@@ -95,18 +103,27 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
     private fun updateNeutral(currentRemaining: Duration, delta: Duration, config: TokenBucketConfig): Duration {
         if (delta <= Duration.ZERO) return currentRemaining
 
-        // No refill; only decay overfill if any
-        if (currentRemaining <= config.maxThreshold) {
-            return currentRemaining
+        // First decay any overfill
+        if (currentRemaining > config.maxThreshold) {
+            val overfillDecayPerHour = config.overfillDecayPerHour
+            if (overfillDecayPerHour <= Duration.ZERO) return currentRemaining
+
+            val overfillAmount = currentRemaining - config.maxThreshold
+            val logDecayRate = Math.log(1 - overfillDecayPerHour.inWholeSeconds.toDouble() / 3600.0)
+            val hoursElapsed = delta.inWholeSeconds.toDouble() / 3600.0
+            return config.maxThreshold + overfillAmount * Math.exp(logDecayRate * hoursElapsed)
         }
 
-        val overfillDecayPerHour = config.overfillDecayPerHour
-        if (overfillDecayPerHour <= Duration.ZERO) return currentRemaining
+        val baseRate = config.replenishRateFraction.coerceAtLeast(0f).toDouble()
+        val neutralMultiplier = config.neutralFillRateMultiplier.coerceAtLeast(0f).toDouble()
+        if (baseRate == 0.0 || neutralMultiplier == 0.0) return currentRemaining
 
-        val overfillAmount = currentRemaining - config.maxThreshold
-        val logDecayRate = Math.log(1 - overfillDecayPerHour.inWholeSeconds.toDouble() / 3600.0)
-        val hoursElapsed = delta.inWholeSeconds.toDouble() / 3600.0
-        return config.maxThreshold + overfillAmount * Math.exp(logDecayRate * hoursElapsed)
+        val minutesElapsed = delta.inWholeSeconds.toDouble() / 60.0
+        val changeMinutes = baseRate * neutralMultiplier * minutesElapsed
+        if (changeMinutes <= 0.0) return currentRemaining
+
+        val updated = currentRemaining + changeMinutes.minutes
+        return updated.coerceAtMost(config.maxThreshold)
     }
 
     private fun applyDirectChange(
@@ -125,7 +142,12 @@ class TokenBucket(private val context: Context, private val timeProvider: TimePr
     }
 
     fun persistCurrentState() {
-        SettingsManager.setThresholdRemaining(context, currentRemaining)
+        persistState(timeProvider.now(), currentRemaining)
+    }
+
+    private fun persistState(at: Instant, remaining: Duration) {
+        SettingsManager.setThresholdRemaining(context, remaining)
+        SettingsManager.setThresholdLastUpdated(context, at)
     }
 }
 

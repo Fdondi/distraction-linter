@@ -11,3 +11,9 @@ data class ForegroundAppInfo(
     val category: ResolvedCategory
 )
 
+
+
+
+
+
+

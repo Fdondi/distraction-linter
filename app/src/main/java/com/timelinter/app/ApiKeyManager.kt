@@ -45,10 +45,17 @@ object ApiKeyManager {
         return key
     }
 
-    fun saveGoogleIdToken(context: Context, token: String) {
+    fun saveGoogleIdToken(context: Context, token: String, lastRefreshMs: Long = System.currentTimeMillis()) {
         if (token.isBlank()) return
+        val existingToken = getGoogleIdToken(context)
+        val existingRefresh = getGoogleIdTokenLastRefresh(context)
+        val isSame = existingToken == token && existingRefresh == lastRefreshMs
+        if (isSame) {
+            Log.d(TAG, "Google ID Token unchanged; skipping save.")
+            return
+        }
         putEncryptedString(context, GOOGLE_ID_TOKEN_PREF, token)
-        setGoogleIdTokenLastRefresh(context, System.currentTimeMillis())
+        setGoogleIdTokenLastRefresh(context, lastRefreshMs)
         Log.i(TAG, "Google ID Token saved successfully.")
     }
 
@@ -61,7 +68,17 @@ object ApiKeyManager {
     }
 
     fun setGoogleIdTokenLastRefresh(context: Context, timeMs: Long) {
-        getPreferences(context).edit().putLong(GOOGLE_ID_LAST_REFRESH_PREF, timeMs).apply()
+        val prefs = getPreferences(context)
+        val existing = if (prefs.contains(GOOGLE_ID_LAST_REFRESH_PREF)) {
+            prefs.getLong(GOOGLE_ID_LAST_REFRESH_PREF, 0L)
+        } else {
+            null
+        }
+        if (existing != null && existing == timeMs) {
+            Log.d(TAG, "Google ID token last refresh unchanged: $timeMs")
+            return
+        }
+        prefs.edit().putLong(GOOGLE_ID_LAST_REFRESH_PREF, timeMs).apply()
         Log.d(TAG, "Google ID token last refresh recorded: $timeMs")
     }
 

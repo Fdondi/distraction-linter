@@ -15,11 +15,13 @@ Entrypoint and UI
   - Top‑bar actions to open screens; persists user notes and coach name via `ApiKeyManager`.
 
 - app/src/main/java/com/example/timelinter/AILogScreen.kt
-  - Read‑only API history from `ConversationLogStore.apiHistory`.
   - AI Memory section:
     - Rules editor (editable, saved via `AIMemoryManager.setMemoryRules`).
     - Permanent memory editor (Edit/Save/Cancel) persisted via `AIMemoryManager.setPermanentMemory` and reflected in `ConversationLogStore.aiMemory`.
     - Temporary memories grouped by expiration date using `AIMemoryManager.getActiveTemporaryGroupsByDate`.
+  - Event log viewer:
+    - Lists available log days (files under `files/event_logs/`) from `EventLogStore`.
+    - Expands a day to load its events on demand; search filters the loaded day only.
 
 - app/src/main/java/com/example/timelinter/AppSelectionScreen.kt
   - Selects and shows wasteful apps; relies on `TimeWasterAppManager`.
@@ -40,6 +42,7 @@ Background Services and Flow
     - `ConversationHistoryManager` (system prompt, memory, user templates)
     - `AIInteractionManager` (Gemini model + calls)
   - Responds to tool commands (Allow/Remember) and updates storage (`AIMemoryManager`) and UI store (`ConversationLogStore`).
+  - Configures `EventLogStore` persistence (daily JSON files, optional retention).
   - Screen lock/unlock handling:
     - Stops monitoring when screen turns off to avoid stale context
     - On unlock (ACTION_USER_PRESENT, ACTION_SCREEN_ON, ACTION_USER_UNLOCKED): immediately runs `mainInteractionLoop()` to check current app and refill bucket based on time passed
@@ -115,6 +118,8 @@ Memory and Settings
     - `getOverfillDecayPerHour` / `setOverfillDecayPerHour` - overfill decay rate (default: 10 min/hr)
     - `getGoodAppFillRateMultiplier` / `setGoodAppFillRateMultiplier` - fill rate multiplier for good apps (default: 2.0x)
     - `getNeutralAppFillRateMultiplier` / `setNeutralAppFillRateMultiplier` - fill rate multiplier for neutral apps (default: 1.0x)
+    - `getReplenishRateFraction` / `setReplenishRateFraction` - base refill rate as a fraction of an hour (default: 0.1 → 6 min/hour) used when idle/default category.
+  - Log retention: `getLogRetentionDays` / `setLogRetentionDays` (nullable for "keep forever", default 14 days).
 
 - app/src/main/java/com/example/timelinter/ApiKeyManager.kt
   - Stores API key, Google ID token (for backend auth), coach name, and user notes.

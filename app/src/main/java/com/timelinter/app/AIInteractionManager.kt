@@ -35,11 +35,12 @@ class AIInteractionManager(
     private val backendAuthHelper = BackendAuthHelper(
         signIn = { authProvider(context) },
         getStoredToken = { ApiKeyManager.getGoogleIdToken(context) },
-        saveToken = { ApiKeyManager.saveGoogleIdToken(context, it) },
+        saveTokenWithTimestamp = { token, time ->
+            ApiKeyManager.saveGoogleIdToken(context, token, time)
+        },
         clearToken = { ApiKeyManager.clearGoogleIdToken(context) },
         backend = backendGateway,
         getLastRefreshTimeMs = { ApiKeyManager.getGoogleIdTokenLastRefresh(context) },
-        saveLastRefreshTimeMs = { ApiKeyManager.setGoogleIdTokenLastRefresh(context, it) },
         timeProviderMs = { System.currentTimeMillis() },
     )
 
@@ -238,6 +239,30 @@ class AIInteractionManager(
                 tools = emptyList(),
                 authExpired = false,
             )
+        }
+
+        fun composeUserMessageWithToolErrors(
+            baseMessage: String,
+            toolErrors: List<ToolCallIssue>
+        ): String {
+            if (toolErrors.isEmpty()) return baseMessage
+
+            val builder = StringBuilder()
+            if (baseMessage.isNotBlank()) {
+                builder.append(baseMessage.trim())
+                builder.append("\n\n")
+            }
+
+            builder.append("Tool call could not be processed:")
+            toolErrors.forEach { issue ->
+                val reason = when (issue.reason) {
+                    ToolCallIssueReason.TEXT_TOOL_FORMAT -> "Tool call was written as text."
+                    ToolCallIssueReason.INVALID_ARGS -> "Tool call had invalid arguments."
+                    ToolCallIssueReason.UNSUPPORTED_TOOL -> "Unsupported tool name."
+                }
+                builder.append("\n• ${issue.rawText} — $reason")
+            }
+            return builder.toString()
         }
     }
 }

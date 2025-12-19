@@ -1,5 +1,6 @@
 package com.timelinter.app
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.annotation.VisibleForTesting
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,7 +41,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -48,6 +55,8 @@ import kotlinx.datetime.format.Padding
 import kotlinx.datetime.format.char
 import kotlinx.datetime.toLocalDateTime
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import kotlin.time.ExperimentalTime
@@ -65,6 +74,8 @@ fun AILogScreen(
 ) {
     val events by EventLogStore.events.collectAsState()
     val aiMemory by ConversationLogStore.aiMemory.collectAsState()
+    val availableDays by EventLogStore.availableDays.collectAsState()
+    val currentDay by EventLogStore.currentDay.collectAsState()
     val temporaryAllows by TemporaryAllowStore.allows.collectAsState()
     val context = LocalContext.current
 
@@ -99,6 +110,13 @@ fun AILogScreen(
             if (query.isBlank()) events else EventLogStore.search(query)
         }
     }
+    var expandedDay by remember { mutableStateOf<LocalDate?>(null) }
+    LaunchedEffect(currentDay) {
+        if (expandedDay == null) {
+            expandedDay = currentDay
+        }
+    }
+    val dayFormatter = remember { DateTimeFormatter.ISO_LOCAL_DATE }
 
     fun durationLabel(duration: Duration): String {
         val totalMinutes = duration.inWholeMinutes
@@ -343,67 +361,173 @@ fun AILogScreen(
                 }
             }
 
-            // Event log with search
+            // Event logs segmented by day
             item {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
+                Text(text = "Event Logs", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+            }
+            items(availableDays, key = { it.toString() }) { day ->
+                val isExpanded = expandedDay == day
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("eventLogSearch"),
-                    label = { Text("Search events") },
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                if (filteredEvents.isEmpty()) {
-                    Text(
-                        text = "No events yet.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-            itemsIndexed(filteredEvents) { _, entry ->
-                val timestamp = remember(entry.timestamp) {
-                    val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                    formatter.format(Date(entry.timestamp))
-                }
-
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = entry.title,
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                    },
-                    overlineContent = {
+                        .clickable {
+                            val willExpand = !isExpanded
+                            expandedDay = if (willExpand) day else null
+                            if (willExpand) {
+                                EventLogStore.loadDay(day)
+                            }
+                        }
+                        .padding(vertical = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = entry.type.name,
-                                style = MaterialTheme.typography.labelSmall
+                                text = day.format(dayFormatter),
+                                style = MaterialTheme.typography.titleSmall
                             )
                             Text(
-                                text = timestamp,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
+                                text = if (isExpanded) "Hide" else "Show",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
-                    },
-                    supportingContent = {
-                        val roleSuffix = entry.role?.let { " ($it)" } ?: ""
-                        Text(
-                            text = (entry.details ?: "") + roleSuffix,
-                            maxLines = 8,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (isExpanded && currentDay == day) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("eventLogSearch"),
+                                label = { Text("Search events") },
+                                singleLine = true
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            val toolCallColor = MaterialTheme.colorScheme.tertiary
+                            val toolTypeColor = MaterialTheme.colorScheme.primary
+                            val toolErrorColor = MaterialTheme.colorScheme.error
+                            val defaultTypeColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            if (filteredEvents.isEmpty()) {
+                                Text(
+                                    text = "No events yet.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                            filteredEvents.forEach { entry ->
+                                val timestamp = remember(entry.timestamp) {
+                                    val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                                    formatter.format(Date(entry.timestamp))
+                                }
+                                val supportingColor = when (entry.type) {
+                                    EventType.TOOL -> toolTypeColor
+                                    EventType.TOOL_ERROR -> toolErrorColor
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                }
+                                val typeColor = when (entry.type) {
+                                    EventType.TOOL -> toolTypeColor
+                                    EventType.TOOL_ERROR -> toolErrorColor
+                                    else -> defaultTypeColor
+                                }
+                                val highlightColor = when (entry.type) {
+                                    EventType.TOOL_ERROR -> toolErrorColor
+                                    else -> toolCallColor
+                                }
+                                val annotatedDetails = remember(entry.details, entry.role, highlightColor) {
+                                    buildLogDetailsAnnotatedString(
+                                        details = entry.details.orEmpty(),
+                                        role = entry.role,
+                                        toolCallRegex = TOOL_CALL_REGEX,
+                                        toolCallColor = highlightColor
+                                    )
+                                }
+
+                                ListItem(
+                                    headlineContent = {
+                                        Text(
+                                            text = entry.title,
+                                            style = MaterialTheme.typography.titleSmall
+                                        )
+                                    },
+                                    overlineContent = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = entry.type.name,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = typeColor
+                                            )
+                                            Text(
+                                                text = timestamp,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            text = annotatedDetails,
+                                            maxLines = 8,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = supportingColor
+                                        )
+                                    }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
                     }
-                )
-                HorizontalDivider()
+                }
             }
         }
     }
 }
 
+@VisibleForTesting
+internal val TOOL_CALL_REGEX = Regex("""\b(?:allow|remember)\s*\([^)]*\)""", RegexOption.IGNORE_CASE)
 
+@VisibleForTesting
+internal fun buildLogDetailsAnnotatedString(
+    details: String,
+    role: String?,
+    toolCallRegex: Regex,
+    toolCallColor: Color
+): AnnotatedString {
+    val textWithRole = buildString {
+        if (details.isNotBlank()) {
+            append(details.trimEnd())
+        }
+        if (!role.isNullOrBlank()) {
+            if (isNotEmpty()) append(" ")
+            append("(${role.trim()})")
+        }
+    }
+
+    return buildAnnotatedString {
+        if (textWithRole.isEmpty()) return@buildAnnotatedString
+
+        var currentIndex = 0
+        for (match in toolCallRegex.findAll(textWithRole)) {
+            if (match.range.first > currentIndex) {
+                append(textWithRole.substring(currentIndex, match.range.first))
+            }
+            withStyle(
+                SpanStyle(
+                    color = toolCallColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+            ) {
+                append(match.value)
+            }
+            currentIndex = match.range.last + 1
+        }
+        if (currentIndex < textWithRole.length) {
+            append(textWithRole.substring(currentIndex))
+        }
+    }
+}

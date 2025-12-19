@@ -62,11 +62,10 @@ class RealBackendGateway : BackendGateway {
 class BackendAuthHelper(
     private val signIn: suspend () -> String?,
     private val getStoredToken: () -> String?,
-    private val saveToken: (String) -> Unit,
+    private val saveTokenWithTimestamp: (String, Long) -> Unit,
     private val clearToken: () -> Unit,
     private val backend: BackendGateway,
     private val getLastRefreshTimeMs: () -> Long? = { null },
-    private val saveLastRefreshTimeMs: (Long) -> Unit = {},
     private val timeProviderMs: () -> Long = { System.currentTimeMillis() },
 ) {
     companion object {
@@ -104,6 +103,30 @@ class BackendAuthHelper(
         }
     }
 
+    /**
+     * Proactively refresh the token if missing or past the auto-refresh interval.
+     * Returns the current valid token (existing or refreshed), or null if sign-in failed.
+     */
+    suspend fun ensureFreshTokenIfExpired(): String? {
+        val now = timeProviderMs()
+        val token = getStoredToken()
+        val shouldRefresh = shouldRefresh(now, token)
+
+        return when {
+            token.isNullOrEmpty() -> obtainFreshToken(now)
+            shouldRefresh -> {
+                val refreshed = obtainFreshToken(now)
+                if (refreshed == null) {
+                    clearToken()
+                    null
+                } else {
+                    refreshed
+                }
+            }
+            else -> token
+        }
+    }
+
     private fun shouldRefresh(now: Long, token: String?): Boolean {
         if (token.isNullOrEmpty()) return false
         val lastRefresh = getLastRefreshTimeMs() ?: return true
@@ -112,8 +135,7 @@ class BackendAuthHelper(
 
     private suspend fun obtainFreshToken(now: Long = timeProviderMs()): String? {
         val newToken = signIn() ?: return null
-        saveToken(newToken)
-        saveLastRefreshTimeMs(now)
+        saveTokenWithTimestamp(newToken, now)
         return newToken
     }
 }

@@ -11,6 +11,7 @@ class BackendAuthHelperTest {
     private var storedToken: String? = "old-token"
     private var lastRefreshMs: Long? = null
     private var signInCalls = 0
+    private var saveTokenCalls = 0
     private val backendTokens = mutableListOf<String>()
 
     @Before
@@ -18,6 +19,7 @@ class BackendAuthHelperTest {
         storedToken = "old-token"
         lastRefreshMs = null
         signInCalls = 0
+        saveTokenCalls = 0
         backendTokens.clear()
     }
 
@@ -34,6 +36,7 @@ class BackendAuthHelperTest {
         assertEquals("fresh-token", storedToken)
         assertEquals(now, lastRefreshMs)
         assertEquals(1, signInCalls)
+        assertEquals(1, saveTokenCalls)
     }
 
     @Test
@@ -49,6 +52,7 @@ class BackendAuthHelperTest {
         assertEquals("old-token", storedToken)
         assertEquals(now - 1L, lastRefreshMs)
         assertEquals(0, signInCalls)
+        assertEquals(0, saveTokenCalls)
     }
 
     @Test
@@ -65,17 +69,73 @@ class BackendAuthHelperTest {
         assertEquals("old-token", storedToken)
         assertEquals(0L, lastRefreshMs)
         assertEquals(0, signInCalls)
+        assertEquals(0, saveTokenCalls)
         assertEquals("ok", result)
     }
 
-    private fun createHelper(now: Long): BackendAuthHelper {
+    @Test
+    fun refreshesImmediatelyWhenTokenExpiredWithoutBackendCall() = runBlocking {
+        val now = BackendAuthHelper.AUTO_REFRESH_INTERVAL_MS + 10L
+        lastRefreshMs = 0L
+
+        val helper = createHelper(now)
+
+        val refreshed = helper.ensureFreshTokenIfExpired()
+
+        assertEquals("fresh-token", refreshed)
+        assertEquals("fresh-token", storedToken)
+        assertEquals(now, lastRefreshMs)
+        assertEquals(1, signInCalls)
+        assertEquals(1, saveTokenCalls)
+        assertTrue("Backend should not be invoked during proactive refresh", backendTokens.isEmpty())
+    }
+
+    @Test
+    fun doesNotRefreshWhenTokenIsRecent() = runBlocking {
+        val now = 12345L
+        lastRefreshMs = now - 5L
+
+        val helper = createHelper(now)
+
+        val refreshed = helper.ensureFreshTokenIfExpired()
+
+        assertEquals("old-token", refreshed)
+        assertEquals("old-token", storedToken)
+        assertEquals(now - 5L, lastRefreshMs)
+        assertEquals(0, signInCalls)
+        assertEquals(0, saveTokenCalls)
+        assertTrue(backendTokens.isEmpty())
+    }
+
+    @Test
+    fun clearsTokenWhenRefreshFails() = runBlocking {
+        val now = BackendAuthHelper.AUTO_REFRESH_INTERVAL_MS + 99L
+        lastRefreshMs = 0L
+
+        val helper = createHelper(now, signInResult = null)
+
+        val refreshed = helper.ensureFreshTokenIfExpired()
+
+        assertEquals(null, refreshed)
+        assertEquals(null, storedToken)
+        assertEquals(1, signInCalls)
+        assertEquals(0, saveTokenCalls)
+        assertEquals(0L, lastRefreshMs)
+        assertTrue(backendTokens.isEmpty())
+    }
+
+    private fun createHelper(now: Long, signInResult: String? = "fresh-token"): BackendAuthHelper {
         return BackendAuthHelper(
             signIn = {
                 signInCalls++
-                "fresh-token"
+                signInResult
             },
             getStoredToken = { storedToken },
-            saveToken = { token -> storedToken = token },
+            saveTokenWithTimestamp = { token, time ->
+                saveTokenCalls++
+                storedToken = token
+                lastRefreshMs = time
+            },
             clearToken = { storedToken = null },
             backend = object : BackendGateway {
                 override suspend fun generate(
@@ -89,7 +149,6 @@ class BackendAuthHelperTest {
                 }
             },
             getLastRefreshTimeMs = { lastRefreshMs },
-            saveLastRefreshTimeMs = { time -> lastRefreshMs = time },
             timeProviderMs = { now }
         )
     }

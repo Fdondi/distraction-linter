@@ -18,6 +18,7 @@ object GeminiFunctionCallParser {
     fun parse(response: GenerateContentResponse): ParsedResponse {
         val tools = mutableListOf<ToolCommand>()
         val textParts = mutableListOf<String>()
+        val toolErrors = mutableListOf<ToolCallIssue>()
 
         val candidates = try {
             response.candidates
@@ -29,15 +30,31 @@ object GeminiFunctionCallParser {
                 try {
                     when (part) {
                         is TextPart -> {
-                            // Split into lines and drop tool-like lines
-                            val cleaned = filterOutToolLikeLines(part.text.lines()).joinToString("\n").trim()
+                            // Extract inline tool calls inside the text (e.g., "...achievement.allow(5)")
+                            val inlineResult = extractInlineTools(part.text)
+                            tools += inlineResult.tools
+                            toolErrors += inlineResult.issues
+
+                            // Split into lines, drop tool-like lines, but remember them as failed attempts
+                            val filtered = filterOutToolLikeLines(inlineResult.cleanedText.lines())
+                            val cleaned = filtered.cleanedLines.joinToString("\n").trim()
                             if (cleaned.isNotEmpty()) textParts.add(cleaned)
+                            filtered.toolLikeLines.forEach { line ->
+                                toolErrors.add(
+                                    ToolCallIssue(
+                                        reason = ToolCallIssueReason.TEXT_TOOL_FORMAT,
+                                        rawText = line.trim()
+                                    )
+                                )
+                            }
                         }
                         else -> {
                             // Attempt to reflectively read function call
                             val simple = part::class.java.simpleName
                             if (simple.equals("FunctionCall", ignoreCase = true)) {
-                                extractToolFromFunctionCall(part)?.let { tools.add(it) }
+                                val outcome = extractToolFromFunctionCall(part)
+                                outcome.tool?.let { tools.add(it) }
+                                outcome.issue?.let { toolErrors.add(it) }
                             }
                         }
                     }
@@ -48,14 +65,14 @@ object GeminiFunctionCallParser {
         }
 
         val message = textParts.joinToString("\n").trim()
-        return ParsedResponse(userMessage = message, tools = tools)
+        return ParsedResponse(userMessage = message, tools = tools, toolErrors = toolErrors)
     }
 
-    private fun extractToolFromFunctionCall(part: Any): ToolCommand? {
+    private fun extractToolFromFunctionCall(part: Any): ExtractionOutcome {
         return try {
             val cls = part::class.java
             val name = cls.methods.firstOrNull { it.name == "getName" }?.invoke(part) as? String
-                ?: return null
+                ?: return ExtractionOutcome()
 
             // args may be Map-like or JSON-like; try getArgs() and convert to Map<String, Any?> via toString parse for simple keys
             val argsObj = cls.methods.firstOrNull { it.name == "getArgs" }?.invoke(part)
@@ -69,19 +86,51 @@ object GeminiFunctionCallParser {
                     val minutes = (argsMap["minutes"] as? Number)?.toInt()
                         ?: (argsMap["minutes"] as? String)?.toIntOrNull()
                     val app = argsMap["app"]?.toString()?.takeIf { it.isNotBlank() }
-                    minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it.minutes, app) }
+                    val tool = minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it.minutes, app) }
+                    if (tool != null) {
+                        ExtractionOutcome(tool = tool)
+                    } else {
+                        ExtractionOutcome(
+                            issue = ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = buildRawCall(name, argsMap)
+                            )
+                        )
+                    }
                 }
                 "remember" -> {
                     val content = argsMap["content"]?.toString()?.takeIf { it.isNotBlank() }
                     val minutes = (argsMap["minutes"] as? Number)?.toInt()
                         ?: (argsMap["minutes"] as? String)?.toIntOrNull()
-                    content?.let { ToolCommand.Remember(it, minutes?.minutes) }
+                    val tool = content?.let { ToolCommand.Remember(it, minutes?.minutes) }
+                    if (tool != null) {
+                        ExtractionOutcome(tool = tool)
+                    } else {
+                        ExtractionOutcome(
+                            issue = ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = buildRawCall(name, argsMap)
+                            )
+                        )
+                    }
                 }
-                else -> null
+                else -> {
+                    ExtractionOutcome(
+                        issue = ToolCallIssue(
+                            reason = ToolCallIssueReason.UNSUPPORTED_TOOL,
+                            rawText = buildRawCall(name, argsMap)
+                        )
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to extract function call: ${e.message}")
-            null
+            ExtractionOutcome(
+                issue = ToolCallIssue(
+                    reason = ToolCallIssueReason.INVALID_ARGS,
+                    rawText = part.toString()
+                )
+            )
         }
     }
 
@@ -100,17 +149,113 @@ object GeminiFunctionCallParser {
         }.toMap()
     }
 
-    private fun filterOutToolLikeLines(lines: List<String>): List<String> {
+    private fun filterOutToolLikeLines(lines: List<String>): FilterResult {
         val toolPatterns = listOf(
             Regex("^\\s*#\\s*ALLOW\\b.*", RegexOption.IGNORE_CASE),
             Regex("^\\s*#\\s*REMEMBER\\b.*", RegexOption.IGNORE_CASE),
             Regex("^\\s*allow\\s*\\(.*\\)\\s*$", RegexOption.IGNORE_CASE),
             Regex("^\\s*remember\\s*\\(.*\\)\\s*$", RegexOption.IGNORE_CASE)
         )
-        return lines.filter { line ->
-            toolPatterns.none { it.containsMatchIn(line) }
+        val cleaned = mutableListOf<String>()
+        val toolLines = mutableListOf<String>()
+        lines.forEach { line ->
+            if (toolPatterns.any { it.containsMatchIn(line) }) {
+                toolLines.add(line)
+            } else {
+                cleaned.add(line)
+            }
         }
+        return FilterResult(cleanedLines = cleaned, toolLikeLines = toolLines)
     }
+
+    private fun buildRawCall(name: String, args: Map<String, Any?>): String {
+        val renderedArgs = args.entries.joinToString(", ") { (k, v) -> "$k=$v" }
+        return "$name($renderedArgs)"
+    }
+
+    private fun extractInlineTools(text: String): InlineExtractionResult {
+        var cursor = 0
+        val cleaned = StringBuilder()
+        val tools = mutableListOf<ToolCommand>()
+        val issues = mutableListOf<ToolCallIssue>()
+
+        INLINE_TOOL_REGEX.findAll(text).forEach { match ->
+            if (match.range.first > cursor) {
+                cleaned.append(text.substring(cursor, match.range.first))
+            }
+            val name = match.groups["name"]?.value?.lowercase()
+            val minutesStr = match.groups["minutes"]?.value
+            val app = match.groups["app"]?.value?.takeIf { it.isNotBlank() }
+            val content = match.groups["content"]?.value
+
+            when (name) {
+                "allow" -> {
+                    val minutes = minutesStr?.toIntOrNull()
+                    if (minutes != null && minutes > 0) {
+                        tools.add(ToolCommand.Allow(minutes.minutes, app))
+                    } else {
+                        issues.add(
+                            ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = match.value
+                            )
+                        )
+                    }
+                }
+                "remember" -> {
+                    if (!content.isNullOrBlank()) {
+                        val minutes = minutesStr?.toIntOrNull()
+                        tools.add(ToolCommand.Remember(content, minutes?.minutes))
+                    } else {
+                        issues.add(
+                            ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = match.value
+                            )
+                        )
+                    }
+                }
+                else -> {
+                    issues.add(
+                        ToolCallIssue(
+                            reason = ToolCallIssueReason.UNSUPPORTED_TOOL,
+                            rawText = match.value
+                        )
+                    )
+                }
+            }
+
+            cursor = match.range.last + 1
+        }
+
+        if (cursor < text.length) {
+            cleaned.append(text.substring(cursor))
+        }
+
+        return InlineExtractionResult(cleaned.toString(), tools, issues)
+    }
+
+    private data class InlineExtractionResult(
+        val cleanedText: String,
+        val tools: List<ToolCommand>,
+        val issues: List<ToolCallIssue>,
+    )
+
+    // Matches allow(5) or remember("note", 10) even when embedded in text
+    private val INLINE_TOOL_REGEX = Regex(
+        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?| "(?<content>[^"]+)"\s*(?:,\s*(?<minutes>\d+))?\s*)\)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private data class FilterResult(
+        val cleanedLines: List<String>,
+        val toolLikeLines: List<String>,
+    )
+
+    private data class ExtractionOutcome(
+        val tool: ToolCommand? = null,
+        val issue: ToolCallIssue? = null,
+    )
 }
 
 

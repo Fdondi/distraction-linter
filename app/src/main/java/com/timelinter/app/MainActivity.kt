@@ -63,13 +63,15 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.timelinter.app.ui.components.AppTopBar
 import com.timelinter.app.ui.components.NavigationActions
 import com.timelinter.app.ui.components.TopNavigationMenu
 import com.timelinter.app.ui.components.ScrollableTextFieldWithScrollbar
 import com.timelinter.app.AppCategoriesScreen
 import kotlinx.coroutines.launch
-
 class MainActivity : ComponentActivity() {
 
     private var showUsageAccessDialog by mutableStateOf(false)
@@ -145,6 +147,10 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         refreshAuthState()
+        EventLogStore.configurePersistenceIfNeeded(
+            context = this,
+            retentionDaysOverride = SettingsManager.getLogRetentionDays(this)
+        )
         // Load user notes
         userNotes = ApiKeyManager.getUserNotes(this)
         // Load coach name
@@ -314,6 +320,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshAuthState()
+        maybeRefreshBackendToken()
         // Re-load user notes on resume
         userNotes = ApiKeyManager.getUserNotes(this)
         // Re-load coach name on resume
@@ -333,6 +340,9 @@ class MainActivity : ComponentActivity() {
             val token = AuthManager.signIn(this@MainActivity)
             isSigningIn = false
             hasBackendToken = !token.isNullOrEmpty()
+            if (hasBackendToken) {
+                verifyBackendStatusOrClear()
+            }
         }
     }
 
@@ -347,6 +357,62 @@ class MainActivity : ComponentActivity() {
             isMonitoringActive = false
         }
         clearGoogleSignIn()
+    }
+
+    private fun maybeRefreshBackendToken() {
+        if (aiMode != SettingsManager.AI_MODE_BACKEND) return
+        if (isSigningIn) return
+        val token = ApiKeyManager.getGoogleIdToken(this)
+        val lastRefresh = ApiKeyManager.getGoogleIdTokenLastRefresh(this)
+        val now = System.currentTimeMillis()
+        val shouldRefresh =
+                token.isNullOrEmpty() ||
+                        lastRefresh == null ||
+                        now - lastRefresh >= BackendAuthHelper.AUTO_REFRESH_INTERVAL_MS
+        if (!shouldRefresh) return
+        lifecycleScope.launch {
+            isSigningIn = true
+            try {
+                val helper = BackendAuthHelper(
+                        signIn = { AuthManager.signIn(this@MainActivity) },
+                        getStoredToken = { ApiKeyManager.getGoogleIdToken(this@MainActivity) },
+                        saveTokenWithTimestamp = { token, time ->
+                            ApiKeyManager.saveGoogleIdToken(this@MainActivity, token, time)
+                        },
+                        clearToken = { ApiKeyManager.clearGoogleIdToken(this@MainActivity) },
+                        backend = RealBackendGateway(),
+                        getLastRefreshTimeMs = { ApiKeyManager.getGoogleIdTokenLastRefresh(this@MainActivity) },
+                        timeProviderMs = { System.currentTimeMillis() }
+                )
+                val refreshed = helper.ensureFreshTokenIfExpired()
+                hasBackendToken = !refreshed.isNullOrEmpty()
+            } finally {
+                isSigningIn = false
+            }
+        }
+    }
+
+    private suspend fun verifyBackendStatusOrClear() {
+        val token = ApiKeyManager.getGoogleIdToken(this@MainActivity)
+        if (token.isNullOrEmpty()) return
+        try {
+            withContext(Dispatchers.IO) {
+                BackendClient.checkAuthStatus(token)
+            }
+        } catch (e: BackendHttpException) {
+            clearGoogleSignIn()
+            hasBackendToken = false
+            val message = when (e.code) {
+                BackendAccessCode.PENDING_APPROVAL ->
+                    "Your account is pending approval. Please wait until it is activated."
+                BackendAccessCode.ACCESS_REFUSED ->
+                    "Access has been refused for this account. Please contact support."
+                else -> "Sign-in failed: HTTP ${e.statusCode}"
+            }
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this@MainActivity, "Sign-in check failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun attemptStartMonitoring() {

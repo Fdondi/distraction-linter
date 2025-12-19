@@ -49,6 +49,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.widget.Toast
+import com.timelinter.app.BackendClient
+import com.timelinter.app.BackendHttpException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -429,7 +434,28 @@ fun SettingsScreen(
                                         coroutineScope.launch {
                                             val token = AuthManager.signIn(context)
                                             if (token != null) {
-                                                isSignedIn = true
+                                                try {
+                                                    withContext(Dispatchers.IO) {
+                                                        BackendClient.checkAuthStatus(token)
+                                                    }
+                                                    isSignedIn = true
+                                                } catch (e: BackendHttpException) {
+                                                    ApiKeyManager.clearGoogleIdToken(context)
+                                                    val message = when (e.code) {
+                                                        BackendAccessCode.PENDING_APPROVAL ->
+                                                            "Your account is pending approval. Please wait until it is activated."
+                                                        BackendAccessCode.ACCESS_REFUSED ->
+                                                            "Access has been refused for this account. Please contact support."
+                                                        else -> "Sign-in failed: HTTP ${e.statusCode}"
+                                                    }
+                                                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Sign-in check failed: ${e.message}",
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
                                             }
                                         }
                                     }) {

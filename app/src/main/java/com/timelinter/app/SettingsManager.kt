@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalTime::class)
+
 package com.timelinter.app
 
 import android.content.Context
@@ -7,6 +9,8 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
+import kotlin.time.ExperimentalTime
+import kotlin.time.Instant
 import kotlin.time.toDuration
 
 object SettingsManager {
@@ -27,21 +31,26 @@ object SettingsManager {
     // Threshold bucket settings
     private const val MAX_THRESHOLD_MINUTES_KEY = "max_threshold_minutes"
     private const val THRESHOLD_REMAINING_MS_KEY = "threshold_remaining_ms"           // Internal token bucket storage (ms)
+    private const val THRESHOLD_LAST_UPDATE_MS_KEY = "threshold_last_update_ms"       // When the bucket was last updated (epoch ms)
+    private const val REPLENISH_RATE_FRACTION_KEY = "replenish_rate_fraction"
 
     // Defaults
     private const val DEFAULT_MAX_THRESHOLD_MINUTES = 5
+    private const val DEFAULT_REPLENISH_RATE_FRACTION = 0.1f
 
     // Good Apps settings keys
     private const val MAX_OVERFILL_MINUTES_KEY = "max_overfill_minutes"
     private const val OVERFILL_DECAY_PER_HOUR_MINUTES_KEY = "overfill_decay_per_hour_minutes"
     private const val GOOD_APP_FILL_RATE_MULTIPLIER_KEY = "good_app_fill_rate_multiplier"
     private const val NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY = "neutral_app_fill_rate_multiplier"
+    private const val LOG_RETENTION_DAYS_KEY = "log_retention_days"
 
     // Good Apps default values
     private const val DEFAULT_MAX_OVERFILL_MINUTES = 30
     private const val DEFAULT_OVERFILL_DECAY_PER_HOUR_MINUTES = 10
     private const val DEFAULT_GOOD_APP_FILL_RATE_MULTIPLIER = 2
     private const val DEFAULT_NEUTRAL_APP_FILL_RATE_MULTIPLIER = 1
+    private const val DEFAULT_LOG_RETENTION_DAYS = 14
 
     // AI Mode
     private const val AI_MODE_KEY = "ai_mode"
@@ -149,6 +158,17 @@ object SettingsManager {
         }
     }
 
+    fun getReplenishRateFraction(context: Context): Float {
+        return getPreferences(context)
+            .getFloat(REPLENISH_RATE_FRACTION_KEY, DEFAULT_REPLENISH_RATE_FRACTION)
+            .coerceAtLeast(0f)
+    }
+
+    fun setReplenishRateFraction(context: Context, fraction: Float) {
+        val clamped = fraction.coerceIn(0f, 10f)
+        getPreferences(context).edit { putFloat(REPLENISH_RATE_FRACTION_KEY, clamped) }
+    }
+
     // Replenish interval/amount are now represented via the fraction; legacy APIs removed.
 
     /* =========================  Threshold Remaining (persistence)  ========================= */
@@ -161,6 +181,20 @@ object SettingsManager {
             putLong(
                 THRESHOLD_REMAINING_MS_KEY,
                 value.inWholeMilliseconds
+            )
+        }
+    }
+
+    fun getThresholdLastUpdated(context: Context, defaultValue: Instant): Instant {
+        val stored = getPreferences(context).getLong(THRESHOLD_LAST_UPDATE_MS_KEY, defaultValue.toEpochMilliseconds())
+        return Instant.fromEpochMilliseconds(stored)
+    }
+
+    fun setThresholdLastUpdated(context: Context, instant: Instant) {
+        getPreferences(context).edit {
+            putLong(
+                THRESHOLD_LAST_UPDATE_MS_KEY,
+                instant.toEpochMilliseconds()
             )
         }
     }
@@ -207,5 +241,15 @@ object SettingsManager {
 
     fun setNeutralAppFillRateMultiplier(context: Context, multiplier: Float) {
         getPreferences(context).edit { putFloat(NEUTRAL_APP_FILL_RATE_MULTIPLIER_KEY, multiplier) }
+    }
+
+    fun getLogRetentionDays(context: Context): Int? {
+        val raw = getPreferences(context).getInt(LOG_RETENTION_DAYS_KEY, DEFAULT_LOG_RETENTION_DAYS)
+        return if (raw <= 0) null else raw
+    }
+
+    fun setLogRetentionDays(context: Context, days: Int?) {
+        val value = days ?: -1
+        getPreferences(context).edit { putInt(LOG_RETENTION_DAYS_KEY, value) }
     }
 }

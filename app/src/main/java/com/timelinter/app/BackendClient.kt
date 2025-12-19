@@ -43,6 +43,9 @@ object BackendClient {
         val parts: List<BackendPart>
     )
 
+    @Serializable
+    data class AuthStatusResponse(val status: String)
+
     @Throws(IOException::class, Exception::class)
     fun generate(
         token: String,
@@ -79,6 +82,32 @@ object BackendClient {
             val bodyString = responseBody ?: throw IOException("Empty response body")
             val generateResponse = json.decodeFromString(GenerateResponse.serializer(), bodyString)
             return generateResponse.result
+        }
+    }
+
+    @Throws(IOException::class, Exception::class)
+    fun checkAuthStatus(token: String) {
+        val request = Request.Builder()
+            .url("$BASE_URL/api/auth/status")
+            .addHeader("Authorization", "Bearer $token")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string()
+            if (!response.isSuccessful) {
+                val parsed = parseError(responseBody)
+                val errorMessage = parsed.message ?: (responseBody ?: "Empty response body")
+                throw BackendHttpException(
+                    statusCode = response.code,
+                    message = errorMessage,
+                    code = parsed.code
+                )
+            }
+            // Ensure we can parse the response to confirm shape; ignore content otherwise.
+            if (responseBody != null) {
+                json.decodeFromString(AuthStatusResponse.serializer(), responseBody)
+            }
         }
     }
 

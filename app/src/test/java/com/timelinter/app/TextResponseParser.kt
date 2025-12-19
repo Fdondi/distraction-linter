@@ -10,25 +10,40 @@ import kotlin.time.Duration.Companion.minutes
 object TextResponseParser {
     
     fun parseAIResponse(text: String): ParsedResponse {
+        val inline = extractInlineTools(text)
         val tools = mutableListOf<ToolCommand>()
-        val lines = text.lines()
+        tools += inline.tools
+        val lines = inline.cleanedText.lines()
         val messageParts = mutableListOf<String>()
+        val toolErrors = mutableListOf<ToolCallIssue>()
+        toolErrors += inline.toolErrors
         
         for (line in lines) {
             val tool = parseTool(line)
             if (tool != null) {
                 tools.add(tool)
             } else {
-                // If it's not a tool line, it's part of the message
-                if (line.trim().isNotEmpty()) {
-                    messageParts.add(line)
+                val trimmed = line.trim()
+                // If it's a tool-like line but not valid, record as issue and drop from message
+                if (trimmed.isNotEmpty()) {
+                    if (isToolLikeLine(trimmed)) {
+                        toolErrors.add(
+                            ToolCallIssue(
+                                reason = ToolCallIssueReason.TEXT_TOOL_FORMAT,
+                                rawText = trimmed
+                            )
+                        )
+                    } else {
+                        messageParts.add(line)
+                    }
                 }
             }
         }
         
         return ParsedResponse(
             userMessage = messageParts.joinToString("\n").trim(),
-            tools = tools
+            tools = tools,
+            toolErrors = toolErrors
         )
     }
     
@@ -56,6 +71,87 @@ object TextResponseParser {
         
         return null
     }
+
+    private fun isToolLikeLine(trimmed: String): Boolean {
+        return TOOL_LINE_REGEX.containsMatchIn(trimmed)
+    }
+
+    private val TOOL_LINE_REGEX =
+        """^\s*(allow|remember)\s*\(.*\)\s*$""".toRegex(RegexOption.IGNORE_CASE)
+
+    private fun extractInlineTools(text: String): InlineParseResult {
+        var cursor = 0
+        val cleaned = StringBuilder()
+        val tools = mutableListOf<ToolCommand>()
+        val issues = mutableListOf<ToolCallIssue>()
+
+        INLINE_TOOL_REGEX.findAll(text).forEach { match ->
+            if (match.range.first > cursor) {
+                cleaned.append(text.substring(cursor, match.range.first))
+            }
+            val name = match.groups["name"]?.value?.lowercase()
+            val minutesStr = match.groups["minutes"]?.value
+            val app = match.groups["app"]?.value?.takeIf { it.isNotBlank() }
+            val content = match.groups["content"]?.value
+
+            when (name) {
+                "allow" -> {
+                    val minutes = minutesStr?.toIntOrNull()
+                    if (minutes != null && minutes > 0) {
+                        tools.add(ToolCommand.Allow(minutes.minutes, app))
+                    } else {
+                        issues.add(
+                            ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = match.value
+                            )
+                        )
+                    }
+                }
+                "remember" -> {
+                    if (!content.isNullOrBlank()) {
+                        val minutes = minutesStr?.toIntOrNull()
+                        tools.add(ToolCommand.Remember(content, minutes?.minutes))
+                    } else {
+                        issues.add(
+                            ToolCallIssue(
+                                reason = ToolCallIssueReason.INVALID_ARGS,
+                                rawText = match.value
+                            )
+                        )
+                    }
+                }
+                else -> {
+                    issues.add(
+                        ToolCallIssue(
+                            reason = ToolCallIssueReason.UNSUPPORTED_TOOL,
+                            rawText = match.value
+                        )
+                    )
+                }
+            }
+
+            cursor = match.range.last + 1
+        }
+
+        if (cursor < text.length) {
+            cleaned.append(text.substring(cursor))
+        }
+
+        return InlineParseResult(cleaned.toString(), tools, issues)
+    }
+
+    private data class InlineParseResult(
+        val cleanedText: String,
+        val tools: List<ToolCommand>,
+        val toolErrors: List<ToolCallIssue>,
+    )
+
+    // Matches allow(5) or remember("note", 10) even inline with text
+    private val INLINE_TOOL_REGEX = Regex(
+        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?| "(?<content>[^"]+)"\s*(?:,\s*(?<minutes>\d+))?\s*)\)""",
+        RegexOption.IGNORE_CASE
+    )
 }
 
 // Global function for backward compatibility with existing tests

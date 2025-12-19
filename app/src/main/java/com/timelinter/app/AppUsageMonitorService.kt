@@ -149,6 +149,7 @@ class AppUsageMonitorService : Service() {
     private var mainLoopFuture: ScheduledFuture<*>? = null
     private var statsFuture: ScheduledFuture<*>? = null
     private var screenStateReceiver: BroadcastReceiver? = null
+    private var cleanedUp = false
 
     // Persons for MessagingStyle
     private lateinit var userPerson: Person
@@ -202,6 +203,10 @@ class AppUsageMonitorService : Service() {
             freeBucketResumeDurationProvider = { SettingsManager.getFreeBucketResumeDuration(this) }
         )
         EventLogStore.setContextLineProvider { buildLogContextLine() }
+        EventLogStore.configurePersistenceIfNeeded(
+            context = this,
+            retentionDaysOverride = SettingsManager.getLogRetentionDays(this)
+        )
 
         Log.d(TAG, "Starting foreground service with notification ID: $STATS_NOTIFICATION_ID")
         try {
@@ -296,6 +301,9 @@ class AppUsageMonitorService : Service() {
                         interactionStateManager.resetToObserving()
                         // Cancel any in-flight conversation notification
                         try { notificationManager.cancel(NOTIFICATION_ID) } catch (_: Throwable) {}
+                        // Do NOT shutdown service on screen off anymore.
+                        // We rely on specialUse type to keep service alive in background.
+                        // shutdownService("screen off") 
                     }
                     Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_UNLOCKED -> {
                         // Only resume if truly unlocked and interactive
@@ -333,6 +341,55 @@ class AppUsageMonitorService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Error registering screen state receiver", e)
         }
+    }
+
+    private fun shutdownService(reason: String) {
+        if (cleanedUp) {
+            Log.d(TAG, "shutdownService skipped; already cleaned up ($reason)")
+            return
+        }
+        cleanedUp = true
+        Log.i(TAG, "shutdownService called ($reason)")
+
+        // Stop periodic work and persist bucket state before teardown
+        stopMonitoringTasks("shutdown: $reason")
+        runCatching { tokenBucket.persistCurrentState() }.onFailure {
+            Log.e(TAG, "Failed to persist bucket during shutdown", it)
+        }
+
+        // Tear down notifications
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }.onFailure {
+            Log.e(TAG, "Error removing foreground notification during shutdown", it)
+        }
+        runCatching { notificationManager.cancelAll() }.onFailure {
+            Log.e(TAG, "Error cancelling notifications during shutdown", it)
+        }
+
+        // Unregister receiver
+        runCatching {
+            if (screenStateReceiver != null) {
+                unregisterReceiver(screenStateReceiver)
+                screenStateReceiver = null
+                Log.d(TAG, "Screen state receiver unregistered in shutdown")
+            }
+        }.onFailure { Log.e(TAG, "Error unregistering screen state receiver during shutdown", it) }
+
+        // Cancel background work
+        serviceScope.cancel()
+        executor.shutdown()
+        EventLogStore.setContextLineProvider(null)
+        serviceInstance = null
+
+        // Finally request service stop
+        runCatching { stopSelf() }.onFailure {
+            Log.e(TAG, "Error calling stopSelf during shutdown", it)
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "onTaskRemoved called; shutting down service")
+        shutdownService("task removed")
+        super.onTaskRemoved(rootIntent)
     }
 
     /**
@@ -452,6 +509,17 @@ class AppUsageMonitorService : Service() {
                      return@launch
                 }
 
+                if (parsedResponse.toolErrors.isNotEmpty()) {
+                    parsedResponse.toolErrors.forEach { issue ->
+                        conversationHistoryManager.addToolParseIssue(issue)
+                    }
+                }
+
+                val finalUserMessage = AIInteractionManager.composeUserMessageWithToolErrors(
+                    baseMessage = parsedResponse.userMessage,
+                    toolErrors = parsedResponse.toolErrors
+                )
+
                 if (authExpired != parsedResponse.authExpired) {
                     authExpired = parsedResponse.authExpired
                     updateStatsNotification()
@@ -485,8 +553,8 @@ class AppUsageMonitorService : Service() {
                 }
 
                 // Step 4: If there was any non-tool answer,  display to user
-                if (parsedResponse.userMessage.isNotEmpty()) {
-                    conversationHistoryManager.addAIMessage(parsedResponse.userMessage)
+                if (finalUserMessage.isNotEmpty()) {
+                    conversationHistoryManager.addAIMessage(finalUserMessage)
                     showConversationNotification(
                         appName = appInfo?.readableName ?: "Unknown App",
                         sessionTime = sessionWastedTime,
@@ -495,7 +563,7 @@ class AppUsageMonitorService : Service() {
                 }
 
                 // Step 5a/5b: Check if conversation should reset or continue
-                if (shouldResetConversation || parsedResponse.userMessage.isEmpty()) {
+                if (shouldResetConversation || finalUserMessage.isEmpty()) {
                     // Step 5a: ALLOW tool used or no non-tool message -> archive and reset
                     Log.d(TAG, "Resetting conversation (ALLOW used or no message) - archiving first")
                     tryArchiveMemoriesThenClear(appInfo)
@@ -1083,31 +1151,9 @@ class AppUsageMonitorService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         Log.d(TAG, "onDestroy called")
-        // Clear the service instance reference
-        serviceInstance = null
-        // Persist bucket value so it survives service restarts
-        tokenBucket.persistCurrentState()
-        serviceScope.cancel()
-        executor.shutdown()
-        isMonitoringScheduled.set(false)
-        EventLogStore.setContextLineProvider(null)
-        
-        // Cancel all notifications when service is destroyed
-        notificationManager.cancelAll()
-        Log.d(TAG, "Cancelled all notifications on service destroy")
-        
-        // Unregister receiver
-        try {
-            if (screenStateReceiver != null) {
-                unregisterReceiver(screenStateReceiver)
-                screenStateReceiver = null
-                Log.d(TAG, "Screen state receiver unregistered")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering screen state receiver", e)
-        }
+        shutdownService("onDestroy")
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder {

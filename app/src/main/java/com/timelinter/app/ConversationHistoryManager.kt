@@ -331,6 +331,13 @@ class ConversationHistoryManager(
         publishApiHistory()
     }
 
+    fun addToolParseIssue(issue: ToolCallIssue) {
+        val note = "⚠️ TOOL CALL FAILED: ${issue.rawText} (${issue.reason})"
+        apiConversationHistory.addModelNote(note)
+        EventLogStore.logToolParseFailure(issue)
+        publishApiHistory()
+    }
+
     fun addNoResponseMessage(currentAppName: String, sessionTime: Duration, dailyTime: Duration) {
         // Add "*no response*" to AI conversation only (decorated), not to UI
         apiConversationHistory.addUserMessage("*no response*", currentAppName, sessionTime, dailyTime)
