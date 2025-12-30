@@ -432,6 +432,15 @@ class AppUsageMonitorService : Service() {
         val isWasteful = appInfo?.category?.let { isDrainingCategory(it) } == true
         val isAllowed = if (appInfo != null) interactionStateManager.isAllowed(appInfo.readableName) else false
         val remaining = tokenBucket.getCurrentRemaining()
+        
+        // Log diagnostic info when bucket is at 0 but trigger check fails
+        if (remaining <= Duration.ZERO && !TriggerDecider.shouldTrigger(isWasteful, isAllowed, remaining)) {
+            Log.w(
+                TAG,
+                "Bucket at 0 but trigger check failed: isWasteful=$isWasteful, isAllowed=$isAllowed, remaining=${remaining.inWholeSeconds}s, app=${appInfo?.readableName ?: "none"}, category=${appInfo?.category?.id ?: "none"}"
+            )
+        }
+        
         if (!TriggerDecider.shouldTrigger(isWasteful, isAllowed, remaining)) {
             return
         }
@@ -750,6 +759,15 @@ class AppUsageMonitorService : Service() {
             Log.d(
                 TAG,
                 "Bucket updated: ${oldRemaining.inWholeSeconds} s -> ${newRemaining.inWholeSeconds} s (delta: ${delta.inWholeSeconds} s, category: ${effectiveCategory.id}, app: ${appInfo?.readableName ?: "none"})"
+            )
+        }
+        
+        // Log when bucket transitions to 0 or below
+        val transitionedToZero = oldRemaining > Duration.ZERO && newRemaining <= Duration.ZERO
+        if (transitionedToZero) {
+            Log.i(
+                TAG,
+                "Bucket transitioned to 0: old=${oldRemaining.inWholeSeconds}s, new=${newRemaining.inWholeSeconds}s, category=${effectiveCategory.id}, app=${appInfo?.readableName ?: "none"}, isDraining=$isCurrentlyDraining, state=${interactionStateManager.getStateName()}"
             )
         }
 
