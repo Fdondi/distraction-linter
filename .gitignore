@@ -24,3 +24,5 @@ app/docs/
 
 # managed in a separate repo
 backend/
+
+logs/
