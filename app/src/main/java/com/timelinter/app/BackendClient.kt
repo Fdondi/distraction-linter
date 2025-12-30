@@ -30,8 +30,15 @@ object BackendClient {
     )
 
     @Serializable
+    data class FunctionCall(
+        val name: String,
+        val args: Map<String, JsonElement> = emptyMap()
+    )
+
+    @Serializable
     data class GenerateResponse(
-        val result: String
+        val result: String,
+        val function_calls: List<FunctionCall> = emptyList()
     )
 
     @Serializable
@@ -52,7 +59,7 @@ object BackendClient {
         model: String,
         contents: List<BackendContent>,
         prompt: String? = null,
-    ): String {
+    ): GenerateResponse {
         val safeContents = if (contents.isEmpty() && prompt != null) {
             listOf(BackendContent(role = "user", parts = listOf(BackendPart(text = prompt))))
         } else {
@@ -81,7 +88,7 @@ object BackendClient {
 
             val bodyString = responseBody ?: throw IOException("Empty response body")
             val generateResponse = json.decodeFromString(GenerateResponse.serializer(), bodyString)
-            return generateResponse.result
+            return generateResponse
         }
     }
 

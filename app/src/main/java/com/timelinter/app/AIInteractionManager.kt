@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.Content
+import com.google.ai.client.generativeai.type.GenerateContentConfig
 import com.google.ai.client.generativeai.type.TextPart
 import com.timelinter.app.BackendPayloadBuilder
 import kotlinx.coroutines.CoroutineScope
@@ -129,12 +130,16 @@ class AIInteractionManager(
              val modelId = config.modelName 
 
              return try {
-                 val resultText = backendAuthHelper.generateWithAutoRefresh(
+                 val response = backendAuthHelper.generateWithAutoRefresh(
                      model = modelId,
                      contents = contentsPayload,
                      prompt = null, // avoid legacy prompt duplication
                  )
-                ParsedResponse(userMessage = resultText, tools = emptyList(), authExpired = false)
+                 // Parse function calls from backend response
+                 val tools = response.function_calls.mapNotNull { fnCall ->
+                     parseBackendFunctionCall(fnCall)
+                 }
+                ParsedResponse(userMessage = response.result, tools = tools, authExpired = false)
              } catch (e: BackendAuthException) {
                  Log.e(tag, "Backend auth error", e)
                 ParsedResponse(
@@ -153,7 +158,15 @@ class AIInteractionManager(
         } else {
              val model = getInitializedModel(task) ?: return ParsedResponse(userMessage = "(Error: AI not initialized)", tools = emptyList())
              return try {
-                 val response = model.generateContent(*history.toTypedArray())
+                 // Create config with function declarations for function calling
+                 val tool = FunctionDeclarations.createTool()
+                 val config = GenerateContentConfig(
+                     tools = listOf(tool)
+                 )
+                 val response = model.generateContent(
+                     contents = history,
+                     config = config
+                 )
                  GeminiFunctionCallParser.parse(response)
              } catch (e: Exception) {
                  Log.e(tag, "Direct API error", e)
@@ -189,12 +202,16 @@ class AIInteractionManager(
                              )
                          )
                      }
-                 val resultText = backendAuthHelper.generateWithAutoRefresh(
+                 val response = backendAuthHelper.generateWithAutoRefresh(
                      model = modelId,
                      contents = structured,
                      prompt = null,
                  )
-                 ParsedResponse(userMessage = resultText, tools = emptyList())
+                 // Parse function calls from backend response
+                 val tools = response.function_calls.mapNotNull { fnCall ->
+                     parseBackendFunctionCall(fnCall)
+                 }
+                 ParsedResponse(userMessage = response.result, tools = tools)
             } catch (e: BackendHttpException) {
                 Log.e(tag, "Backend HTTP error (custom contents)", e)
                 mapBackendHttpError(e)
@@ -205,13 +222,51 @@ class AIInteractionManager(
          } else {
              val model = getInitializedModel(task) ?: return null
              return try {
-                 val response = model.generateContent(*contents.toTypedArray())
+                 // Create config with function declarations for function calling
+                 val tool = FunctionDeclarations.createTool()
+                 val config = GenerateContentConfig(
+                     tools = listOf(tool)
+                 )
+                 val response = model.generateContent(
+                     contents = contents,
+                     config = config
+                 )
                  GeminiFunctionCallParser.parse(response)
              } catch (e: Exception) {
                  Log.e(tag, "Direct API error (custom contents)", e)
                  null
              }
          }
+    }
+
+    /**
+     * Parse a backend function call into a ToolCommand.
+     */
+    private fun parseBackendFunctionCall(fnCall: BackendClient.FunctionCall): ToolCommand? {
+        fun getIntValue(elem: JsonElement?): Int? {
+            return elem?.jsonPrimitive?.let { prim ->
+                if (prim.isString) prim.content.toIntOrNull()
+                else try { prim.int } catch (e: Exception) { null }
+            }
+        }
+        
+        fun getStringValue(elem: JsonElement?): String? {
+            return elem?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+
+        return when (fnCall.name.lowercase()) {
+            "allow" -> {
+                val minutes = getIntValue(fnCall.args["minutes"])
+                val app = getStringValue(fnCall.args["app"])
+                minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it.minutes, app) }
+            }
+            "remember" -> {
+                val content = getStringValue(fnCall.args["content"])
+                val minutes = getIntValue(fnCall.args["minutes"])
+                content?.let { ToolCommand.Remember(it, minutes?.minutes) }
+            }
+            else -> null
+        }
     }
 
     companion object {

@@ -32,7 +32,7 @@ interface BackendGateway {
         model: String,
         contents: List<BackendClient.BackendContent>,
         prompt: String? = null,
-    ): String
+    ): BackendClient.GenerateResponse
 }
 
 /**
@@ -44,7 +44,7 @@ class RealBackendGateway : BackendGateway {
         model: String,
         contents: List<BackendClient.BackendContent>,
         prompt: String?,
-    ): String {
+    ): BackendClient.GenerateResponse {
         return withContext(Dispatchers.IO) {
             BackendClient.generate(token, model, contents, prompt)
         }
@@ -76,7 +76,7 @@ class BackendAuthHelper(
         model: String,
         contents: List<BackendClient.BackendContent>,
         prompt: String? = null,
-    ): String {
+    ): BackendClient.GenerateResponse {
         var token = getStoredToken()
         val now = timeProviderMs()
 
