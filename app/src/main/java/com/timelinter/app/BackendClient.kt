@@ -14,12 +14,23 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
 object BackendClient {
     private const val BASE_URL = "https://my-gemini-backend-834588824353.europe-west1.run.app"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     
-    private val client = OkHttpClient()
+    // Increased timeouts to handle cold server starts
+    // Connect timeout: 30s (time to establish connection, including cold start)
+    // Read timeout: 90s (time to read response, including AI generation)
+    // Write timeout: 30s (time to send request)
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
     private val json = Json { ignoreUnknownKeys = true }
 
     @Serializable
