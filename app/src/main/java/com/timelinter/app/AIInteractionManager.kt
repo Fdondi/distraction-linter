@@ -4,12 +4,15 @@ import android.content.Context
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.Content
-import com.google.ai.client.generativeai.type.GenerateContentConfig
 import com.google.ai.client.generativeai.type.TextPart
 import com.timelinter.app.BackendPayloadBuilder
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 /*
 AI interaction model:
@@ -60,9 +63,11 @@ class AIInteractionManager(
         if (apiKey != null) {
             try {
                 val modelConfig = AIConfigManager.getModelForTask(context, task)
+                val tool = FunctionDeclarations.createTool()
                 generativeModel = GenerativeModel(
                     modelName = modelConfig.modelName,
-                    apiKey = apiKey
+                    apiKey = apiKey,
+                    tools = listOf(tool)
                     // Add safetySettings and generationConfig if needed
                 )
                 currentTask = task
@@ -135,10 +140,16 @@ class AIInteractionManager(
                      contents = contentsPayload,
                      prompt = null, // avoid legacy prompt duplication
                  )
-                 // Parse function calls from backend response
-                 val tools = response.function_calls.mapNotNull { fnCall ->
-                     parseBackendFunctionCall(fnCall)
-                 }
+                // Parse function calls from backend response
+                Log.d(tag, "Received ${response.function_calls.size} function calls from backend")
+                val tools = response.function_calls.mapNotNull { fnCall ->
+                    val parsed = parseBackendFunctionCall(fnCall)
+                    if (parsed == null) {
+                        Log.w(tag, "Failed to parse function call: ${fnCall.name} with args ${fnCall.args}")
+                    }
+                    parsed
+                }
+                Log.d(tag, "Successfully parsed ${tools.size} tools from ${response.function_calls.size} function calls")
                 ParsedResponse(userMessage = response.result, tools = tools, authExpired = false)
              } catch (e: BackendAuthException) {
                  Log.e(tag, "Backend auth error", e)
@@ -158,15 +169,8 @@ class AIInteractionManager(
         } else {
              val model = getInitializedModel(task) ?: return ParsedResponse(userMessage = "(Error: AI not initialized)", tools = emptyList())
              return try {
-                 // Create config with function declarations for function calling
-                 val tool = FunctionDeclarations.createTool()
-                 val config = GenerateContentConfig(
-                     tools = listOf(tool)
-                 )
-                 val response = model.generateContent(
-                     contents = history,
-                     config = config
-                 )
+                 // Tools are configured on the model, just pass contents
+                 val response = model.generateContent(*history.toTypedArray())
                  GeminiFunctionCallParser.parse(response)
              } catch (e: Exception) {
                  Log.e(tag, "Direct API error", e)
@@ -222,15 +226,8 @@ class AIInteractionManager(
          } else {
              val model = getInitializedModel(task) ?: return null
              return try {
-                 // Create config with function declarations for function calling
-                 val tool = FunctionDeclarations.createTool()
-                 val config = GenerateContentConfig(
-                     tools = listOf(tool)
-                 )
-                 val response = model.generateContent(
-                     contents = contents,
-                     config = config
-                 )
+                 // Tools are configured on the model, just pass contents
+                 val response = model.generateContent(*contents.toTypedArray())
                  GeminiFunctionCallParser.parse(response)
              } catch (e: Exception) {
                  Log.e(tag, "Direct API error (custom contents)", e)
@@ -244,28 +241,78 @@ class AIInteractionManager(
      */
     private fun parseBackendFunctionCall(fnCall: BackendClient.FunctionCall): ToolCommand? {
         fun getIntValue(elem: JsonElement?): Int? {
-            return elem?.jsonPrimitive?.let { prim ->
-                if (prim.isString) prim.content.toIntOrNull()
-                else try { prim.int } catch (e: Exception) { null }
+            if (elem == null) return null
+            return when (elem) {
+                is JsonPrimitive -> {
+                    // JsonPrimitive.content returns string representation for both strings and numbers
+                    // For numeric primitives, content will be "10", "10.5", etc.
+                    // For string primitives, content will be the string value
+                    try {
+                        elem.content.toIntOrNull() ?: elem.content.toDoubleOrNull()?.toInt()
+                    } catch (e: Exception) {
+                        Log.w(tag, "Failed to parse int from JsonPrimitive: ${elem.content}", e)
+                        null
+                    }
+                }
+                else -> {
+                    // Try to extract from other JSON types
+                    try {
+                        elem.toString().toIntOrNull()
+                    } catch (e: Exception) {
+                        Log.w(tag, "Failed to parse int from JsonElement: ${elem}", e)
+                        null
+                    }
+                }
             }
         }
         
         fun getStringValue(elem: JsonElement?): String? {
-            return elem?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            if (elem == null) return null
+            return when {
+                elem is JsonPrimitive -> elem.content.takeIf { it.isNotBlank() }
+                else -> elem.toString().takeIf { it.isNotBlank() && it != "null" }
+            }
+        }
+
+        Log.d(tag, "Parsing function call: name=${fnCall.name}, args=${fnCall.args}")
+        // Log detailed info about the args structure
+        fnCall.args.forEach { (key, value) ->
+            Log.d(tag, "  arg[$key] = $value (type: ${value?.javaClass?.simpleName}, is JsonPrimitive: ${value is JsonPrimitive}, isString: ${(value as? JsonPrimitive)?.isString})")
         }
 
         return when (fnCall.name.lowercase()) {
             "allow" -> {
-                val minutes = getIntValue(fnCall.args["minutes"])
+                val minutesArg = fnCall.args["minutes"]
+                Log.d(tag, "  minutes arg: $minutesArg (type: ${minutesArg?.javaClass?.simpleName})")
+                val minutes = getIntValue(minutesArg)
                 val app = getStringValue(fnCall.args["app"])
-                minutes?.takeIf { it > 0 }?.let { ToolCommand.Allow(it.minutes, app) }
+                Log.d(tag, "Parsing allow: minutes=$minutes, app=$app")
+                if (minutes != null && minutes > 0) {
+                    val result = ToolCommand.Allow(minutes.minutes, app)
+                    Log.i(tag, "Successfully parsed allow command: ${result.duration} for app ${result.app ?: "all"}")
+                    result
+                } else {
+                    Log.w(tag, "Failed to parse allow: minutes=$minutes (must be > 0)")
+                    null
+                }
             }
             "remember" -> {
                 val content = getStringValue(fnCall.args["content"])
                 val minutes = getIntValue(fnCall.args["minutes"])
-                content?.let { ToolCommand.Remember(it, minutes?.minutes) }
+                Log.d(tag, "Parsing remember: content=$content, minutes=$minutes")
+                if (content != null) {
+                    val result = ToolCommand.Remember(content, minutes?.minutes)
+                    Log.i(tag, "Successfully parsed remember command: ${result.content}")
+                    result
+                } else {
+                    Log.w(tag, "Failed to parse remember: content is null or blank")
+                    null
+                }
             }
-            else -> null
+            else -> {
+                Log.w(tag, "Unknown function call name: ${fnCall.name}")
+                null
+            }
         }
     }
 
