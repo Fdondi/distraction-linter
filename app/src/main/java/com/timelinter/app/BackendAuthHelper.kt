@@ -52,43 +52,33 @@ class RealBackendGateway : BackendGateway {
 }
 
 /**
- * Handles retrieving, refreshing, and persisting Google ID tokens for backend calls.
+ * Handles retrieving, refreshing, and persisting app tokens for backend calls.
  *
  * Flow:
- * - Use stored token if present.
- * - If missing, attempt sign-in to obtain one.
- * - If backend returns 401, clear token, re-sign, and retry once.
+ * - Use stored app token if present and not expired.
+ * - If app token is missing or expired, get Google ID token (or trigger sign-in).
+ * - Exchange Google ID token for a new app token (valid for 1 month).
+ * - Use app token for API calls.
+ * - If backend returns 401, clear tokens, re-sign, exchange, and retry once.
  */
 class BackendAuthHelper(
     private val signIn: suspend () -> String?,
-    private val getStoredToken: () -> String?,
-    private val saveTokenWithTimestamp: (String, Long) -> Unit,
-    private val clearToken: () -> Unit,
+    private val getAppToken: () -> String?,
+    private val isAppTokenExpired: () -> Boolean,
+    private val saveAppToken: (String, Long) -> Unit,
+    private val clearAppToken: () -> Unit,
+    private val getGoogleIdToken: () -> String?,
     private val backend: BackendGateway,
-    private val getLastRefreshTimeMs: () -> Long? = { null },
     private val timeProviderMs: () -> Long = { System.currentTimeMillis() },
 ) {
-    companion object {
-        const val AUTO_REFRESH_INTERVAL_MS: Long = 30L * 24 * 60 * 60 * 1000 // 30 days
-    }
-
     suspend fun generateWithAutoRefresh(
         model: String,
         contents: List<BackendClient.BackendContent>,
         prompt: String? = null,
     ): BackendClient.GenerateResponse {
-        var token = getStoredToken()
-        val now = timeProviderMs()
-
-        val shouldProactivelyRefresh = shouldRefresh(now, token)
-        if (token.isNullOrEmpty()) {
-            token =
-                obtainFreshToken(now) ?: throw BackendAuthException("No Google ID token available")
-        } else if (shouldProactivelyRefresh) {
-            val refreshed = obtainFreshToken(now)
-            if (refreshed != null) {
-                token = refreshed
-            }
+        var token = ensureValidAppToken()
+        if (token == null) {
+            throw BackendAuthException("No app token available")
         }
 
         try {
@@ -96,47 +86,62 @@ class BackendAuthHelper(
         } catch (e: BackendHttpException) {
             if (e.statusCode != 401) throw e
             // Token rejected; clear and retry once with a fresh token.
-            clearToken()
-            val refreshed = obtainFreshToken(now)
-                ?: throw BackendAuthException("Unable to refresh Google ID token")
+            clearAppToken()
+            val refreshed = ensureValidAppToken()
+                ?: throw BackendAuthException("Unable to refresh app token")
             return backend.generate(refreshed, model, contents, prompt)
         }
     }
 
     /**
-     * Proactively refresh the token if missing or past the auto-refresh interval.
-     * Returns the current valid token (existing or refreshed), or null if sign-in failed.
+     * Ensures we have a valid app token. Returns the token or null if unable to obtain one.
+     * This will exchange a Google ID token for an app token if needed.
      */
-    suspend fun ensureFreshTokenIfExpired(): String? {
-        val now = timeProviderMs()
-        val token = getStoredToken()
-        val shouldRefresh = shouldRefresh(now, token)
-
-        return when {
-            token.isNullOrEmpty() -> obtainFreshToken(now)
-            shouldRefresh -> {
-                val refreshed = obtainFreshToken(now)
-                if (refreshed == null) {
-                    clearToken()
-                    null
-                } else {
-                    refreshed
-                }
-            }
-            else -> token
+    suspend fun ensureValidAppToken(): String? {
+        val appToken = getAppToken()
+        if (!appToken.isNullOrEmpty() && !isAppTokenExpired()) {
+            return appToken
         }
+
+        // App token is missing or expired, need to exchange
+        return exchangeForAppToken()
     }
 
-    private fun shouldRefresh(now: Long, token: String?): Boolean {
-        if (token.isNullOrEmpty()) return false
-        val lastRefresh = getLastRefreshTimeMs() ?: return true
-        return now - lastRefresh >= AUTO_REFRESH_INTERVAL_MS
-    }
+    private suspend fun exchangeForAppToken(): String? {
+        // Get Google ID token (or trigger sign-in)
+        var googleIdToken = getGoogleIdToken()
+        if (googleIdToken.isNullOrEmpty()) {
+            googleIdToken = signIn() ?: return null
+        }
 
-    private suspend fun obtainFreshToken(now: Long = timeProviderMs()): String? {
-        val newToken = signIn() ?: return null
-        saveTokenWithTimestamp(newToken, now)
-        return newToken
+        // Exchange Google ID token for app token
+        return try {
+            withContext(Dispatchers.IO) {
+                val response = BackendClient.exchangeToken(googleIdToken)
+                val expiresAtMs = BackendClient.parseExpiresAt(response.expiresAt)
+                saveAppToken(response.token, expiresAtMs)
+                response.token
+            }
+        } catch (e: BackendHttpException) {
+            if (e.statusCode == 401) {
+                // Google ID token expired, try signing in again
+                val freshGoogleIdToken = signIn() ?: return null
+                try {
+                    withContext(Dispatchers.IO) {
+                        val response = BackendClient.exchangeToken(freshGoogleIdToken)
+                        val expiresAtMs = BackendClient.parseExpiresAt(response.expiresAt)
+                        saveAppToken(response.token, expiresAtMs)
+                        response.token
+                    }
+                } catch (e2: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

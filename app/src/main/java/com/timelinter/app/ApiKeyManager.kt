@@ -19,6 +19,8 @@ object ApiKeyManager {
     private const val API_KEY_PREF = "gemini_api_key"
     private const val GOOGLE_ID_TOKEN_PREF = "google_id_token"
     private const val GOOGLE_ID_LAST_REFRESH_PREF = "google_id_last_refresh_ms"
+    private const val APP_TOKEN_PREF = "app_token"
+    private const val APP_TOKEN_EXPIRES_AT_PREF = "app_token_expires_at_ms"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
     private const val USER_NOTES_PREF = "user_notes"
     private const val COACH_NAME_PREF = "coach_name"
@@ -91,6 +93,38 @@ object ApiKeyManager {
         getPreferences(context).edit().remove(GOOGLE_ID_TOKEN_PREF).apply()
         getPreferences(context).edit().remove(GOOGLE_ID_LAST_REFRESH_PREF).apply()
         Log.i(TAG, "Google ID Token cleared.")
+    }
+
+    fun saveAppToken(context: Context, token: String, expiresAtMs: Long) {
+        if (token.isBlank()) return
+        putEncryptedString(context, APP_TOKEN_PREF, token)
+        getPreferences(context).edit().putLong(APP_TOKEN_EXPIRES_AT_PREF, expiresAtMs).apply()
+        Log.i(TAG, "App token saved successfully, expires at: $expiresAtMs")
+    }
+
+    fun getAppToken(context: Context): String? {
+        return getEncryptedString(context, APP_TOKEN_PREF, null)
+    }
+
+    fun getAppTokenExpiresAt(context: Context): Long? {
+        val prefs = getPreferences(context)
+        if (!prefs.contains(APP_TOKEN_EXPIRES_AT_PREF)) return null
+        return prefs.getLong(APP_TOKEN_EXPIRES_AT_PREF, 0L)
+    }
+
+    fun hasAppToken(context: Context): Boolean {
+        return !getAppToken(context).isNullOrEmpty()
+    }
+
+    fun isAppTokenExpired(context: Context): Boolean {
+        val expiresAt = getAppTokenExpiresAt(context) ?: return true
+        return System.currentTimeMillis() >= expiresAt
+    }
+
+    fun clearAppToken(context: Context) {
+        getPreferences(context).edit().remove(APP_TOKEN_PREF).apply()
+        getPreferences(context).edit().remove(APP_TOKEN_EXPIRES_AT_PREF).apply()
+        Log.i(TAG, "App token cleared.")
     }
 
     fun hasKey(context: Context): Boolean {

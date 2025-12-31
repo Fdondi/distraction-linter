@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshAuthState() {
         aiMode = SettingsManager.getAIMode(this)
         apiKeyPresent = ApiKeyManager.hasKey(this)
-        hasBackendToken = ApiKeyManager.hasGoogleIdToken(this)
+        hasBackendToken = ApiKeyManager.hasAppToken(this) && !ApiKeyManager.isAppTokenExpired(this)
     }
 
     fun refreshAuthStateForTests() {
@@ -337,17 +337,30 @@ class MainActivity : ComponentActivity() {
         if (isSigningIn) return
         isSigningIn = true
         lifecycleScope.launch {
-            val token = AuthManager.signIn(this@MainActivity)
-            isSigningIn = false
-            hasBackendToken = !token.isNullOrEmpty()
-            if (hasBackendToken) {
-                verifyBackendStatusOrClear()
+            val googleIdToken = AuthManager.signIn(this@MainActivity)
+            if (googleIdToken != null) {
+                ApiKeyManager.saveGoogleIdToken(this@MainActivity, googleIdToken)
+                // Exchange Google ID token for app token
+                try {
+                    val helper = createBackendAuthHelper()
+                    val appToken = helper.ensureValidAppToken()
+                    hasBackendToken = !appToken.isNullOrEmpty()
+                    if (hasBackendToken) {
+                        verifyBackendStatusOrClear()
+                    }
+                } catch (e: Exception) {
+                    hasBackendToken = false
+                }
+            } else {
+                hasBackendToken = false
             }
+            isSigningIn = false
         }
     }
 
     private fun clearGoogleSignIn() {
         ApiKeyManager.clearGoogleIdToken(this)
+        ApiKeyManager.clearAppToken(this)
         hasBackendToken = false
     }
 
@@ -362,29 +375,14 @@ class MainActivity : ComponentActivity() {
     private fun maybeRefreshBackendToken() {
         if (aiMode != SettingsManager.AI_MODE_BACKEND) return
         if (isSigningIn) return
-        val token = ApiKeyManager.getGoogleIdToken(this)
-        val lastRefresh = ApiKeyManager.getGoogleIdTokenLastRefresh(this)
-        val now = System.currentTimeMillis()
-        val shouldRefresh =
-                token.isNullOrEmpty() ||
-                        lastRefresh == null ||
-                        now - lastRefresh >= BackendAuthHelper.AUTO_REFRESH_INTERVAL_MS
+        val appToken = ApiKeyManager.getAppToken(this)
+        val shouldRefresh = appToken.isNullOrEmpty() || ApiKeyManager.isAppTokenExpired(this)
         if (!shouldRefresh) return
         lifecycleScope.launch {
             isSigningIn = true
             try {
-                val helper = BackendAuthHelper(
-                        signIn = { AuthManager.signIn(this@MainActivity) },
-                        getStoredToken = { ApiKeyManager.getGoogleIdToken(this@MainActivity) },
-                        saveTokenWithTimestamp = { token, time ->
-                            ApiKeyManager.saveGoogleIdToken(this@MainActivity, token, time)
-                        },
-                        clearToken = { ApiKeyManager.clearGoogleIdToken(this@MainActivity) },
-                        backend = RealBackendGateway(),
-                        getLastRefreshTimeMs = { ApiKeyManager.getGoogleIdTokenLastRefresh(this@MainActivity) },
-                        timeProviderMs = { System.currentTimeMillis() }
-                )
-                val refreshed = helper.ensureFreshTokenIfExpired()
+                val helper = createBackendAuthHelper()
+                val refreshed = helper.ensureValidAppToken()
                 hasBackendToken = !refreshed.isNullOrEmpty()
             } finally {
                 isSigningIn = false
@@ -392,12 +390,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun createBackendAuthHelper(): BackendAuthHelper {
+        return BackendAuthHelper(
+            signIn = { AuthManager.signIn(this@MainActivity) },
+            getAppToken = { ApiKeyManager.getAppToken(this@MainActivity) },
+            isAppTokenExpired = { ApiKeyManager.isAppTokenExpired(this@MainActivity) },
+            saveAppToken = { token, expiresAtMs ->
+                ApiKeyManager.saveAppToken(this@MainActivity, token, expiresAtMs)
+            },
+            clearAppToken = { ApiKeyManager.clearAppToken(this@MainActivity) },
+            getGoogleIdToken = { ApiKeyManager.getGoogleIdToken(this@MainActivity) },
+            backend = RealBackendGateway(),
+            timeProviderMs = { System.currentTimeMillis() }
+        )
+    }
+
     private suspend fun verifyBackendStatusOrClear() {
-        val token = ApiKeyManager.getGoogleIdToken(this@MainActivity)
-        if (token.isNullOrEmpty()) return
+        val appToken = ApiKeyManager.getAppToken(this@MainActivity)
+        if (appToken.isNullOrEmpty()) return
         try {
             withContext(Dispatchers.IO) {
-                BackendClient.checkAuthStatus(token)
+                BackendClient.checkAuthStatus(appToken)
             }
         } catch (e: BackendHttpException) {
             clearGoogleSignIn()

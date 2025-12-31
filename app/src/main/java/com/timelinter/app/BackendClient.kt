@@ -37,7 +37,7 @@ object BackendClient {
 
     @Serializable
     data class GenerateResponse(
-        val result: String,
+        val result: String? = null,  // null when response only contains function calls, no text
         val function_calls: List<FunctionCall> = emptyList()
     )
 
@@ -52,6 +52,12 @@ object BackendClient {
 
     @Serializable
     data class AuthStatusResponse(val status: String)
+
+    @Serializable
+    data class ExchangeTokenResponse(
+        val token: String,
+        val expiresAt: String
+    )
 
     @Throws(IOException::class, Exception::class)
     fun generate(
@@ -115,6 +121,43 @@ object BackendClient {
             if (responseBody != null) {
                 json.decodeFromString(AuthStatusResponse.serializer(), responseBody)
             }
+        }
+    }
+
+    @Throws(IOException::class, Exception::class)
+    fun exchangeToken(googleIdToken: String): ExchangeTokenResponse {
+        val request = Request.Builder()
+            .url("$BASE_URL/api/auth/exchange")
+            .addHeader("Authorization", "Bearer $googleIdToken")
+            .post("".toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string()
+            if (!response.isSuccessful) {
+                val parsed = parseError(responseBody)
+                val errorMessage = parsed.message ?: (responseBody ?: "Empty response body")
+                throw BackendHttpException(
+                    statusCode = response.code,
+                    message = errorMessage,
+                    code = parsed.code
+                )
+            }
+
+            val bodyString = responseBody ?: throw IOException("Empty response body")
+            return json.decodeFromString(ExchangeTokenResponse.serializer(), bodyString)
+        }
+    }
+
+    /**
+     * Parses an ISO 8601 date string to milliseconds since epoch.
+     */
+    fun parseExpiresAt(isoString: String): Long {
+        return try {
+            Instant.parse(isoString).toEpochMilli()
+        } catch (e: Exception) {
+            // Fallback: if parsing fails, assume 30 days from now
+            System.currentTimeMillis() + (30L * 24 * 60 * 60 * 1000)
         }
     }
 

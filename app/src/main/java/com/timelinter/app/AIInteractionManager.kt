@@ -38,13 +38,14 @@ class AIInteractionManager(
 
     private val backendAuthHelper = BackendAuthHelper(
         signIn = { authProvider(context) },
-        getStoredToken = { ApiKeyManager.getGoogleIdToken(context) },
-        saveTokenWithTimestamp = { token, time ->
-            ApiKeyManager.saveGoogleIdToken(context, token, time)
+        getAppToken = { ApiKeyManager.getAppToken(context) },
+        isAppTokenExpired = { ApiKeyManager.isAppTokenExpired(context) },
+        saveAppToken = { token, expiresAtMs ->
+            ApiKeyManager.saveAppToken(context, token, expiresAtMs)
         },
-        clearToken = { ApiKeyManager.clearGoogleIdToken(context) },
+        clearAppToken = { ApiKeyManager.clearAppToken(context) },
+        getGoogleIdToken = { ApiKeyManager.getGoogleIdToken(context) },
         backend = backendGateway,
-        getLastRefreshTimeMs = { ApiKeyManager.getGoogleIdTokenLastRefresh(context) },
         timeProviderMs = { System.currentTimeMillis() },
     )
 
@@ -150,7 +151,7 @@ class AIInteractionManager(
                     parsed
                 }
                 Log.d(tag, "Successfully parsed ${tools.size} tools from ${response.function_calls.size} function calls")
-                ParsedResponse(userMessage = response.result, tools = tools, authExpired = false)
+                ParsedResponse(userMessage = response.result ?: "", tools = tools, authExpired = false)
              } catch (e: BackendAuthException) {
                  Log.e(tag, "Backend auth error", e)
                 ParsedResponse(
@@ -215,7 +216,7 @@ class AIInteractionManager(
                  val tools = response.function_calls.mapNotNull { fnCall ->
                      parseBackendFunctionCall(fnCall)
                  }
-                 ParsedResponse(userMessage = response.result, tools = tools)
+                 ParsedResponse(userMessage = response.result ?: "", tools = tools)
             } catch (e: BackendHttpException) {
                 Log.e(tag, "Backend HTTP error (custom contents)", e)
                 mapBackendHttpError(e)
