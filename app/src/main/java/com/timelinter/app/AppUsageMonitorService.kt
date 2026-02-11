@@ -171,9 +171,11 @@ class AppUsageMonitorService : Service() {
         interactionStateManager = InteractionStateManager(this)
         
         // Initialize ConversationHistoryManager
+        val coachName = ApiKeyManager.getCoachName(this)
         conversationHistoryManager = ConversationHistoryManager(
             context = this,
-            systemPrompt = readRawResource(R.raw.gemini_system_prompt),
+            systemPrompt = readRawResource(R.raw.gemini_system_prompt)
+                .replace("{{COACH_NAME}}", coachName),
             aiMemoryTemplate = readRawResource(R.raw.ai_memory_template),
             userInfoTemplate = readRawResource(R.raw.user_info_template),
             userInteractionTemplate = readRawResource(R.raw.gemini_user_template),
@@ -192,7 +194,6 @@ class AppUsageMonitorService : Service() {
 
         // Initialize Persons
         userPerson = Person.Builder().setName("You").setKey("user").build()
-        val coachName = ApiKeyManager.getCoachName(this)
         aiPerson = Person.Builder().setName(coachName).setKey("ai").setBot(true).build()
 
         // Initialize token bucket - it will handle its own state

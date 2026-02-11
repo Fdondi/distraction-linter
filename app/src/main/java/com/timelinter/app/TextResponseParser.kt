@@ -4,11 +4,14 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * Test helper to parse text-based function calls from AI responses.
- * Used for testing function call parsing without requiring GenerateContentResponse objects.
+ * Parses text-based AI responses into ParsedResponse, extracting tool calls
+ * written as plain text (e.g., allow(5), remember("note", 10)).
+ *
+ * Used for on-device inference where models return plain text without
+ * structured function calling support.
  */
 object TextResponseParser {
-    
+
     fun parseAIResponse(text: String): ParsedResponse {
         val inline = extractInlineTools(text)
         val tools = mutableListOf<ToolCommand>()
@@ -17,14 +20,13 @@ object TextResponseParser {
         val messageParts = mutableListOf<String>()
         val toolErrors = mutableListOf<ToolCallIssue>()
         toolErrors += inline.toolErrors
-        
+
         for (line in lines) {
             val tool = parseTool(line)
             if (tool != null) {
                 tools.add(tool)
             } else {
                 val trimmed = line.trim()
-                // If it's a tool-like line but not valid, record as issue and drop from message
                 if (trimmed.isNotEmpty()) {
                     if (isToolLikeLine(trimmed)) {
                         toolErrors.add(
@@ -39,17 +41,17 @@ object TextResponseParser {
                 }
             }
         }
-        
+
         return ParsedResponse(
             userMessage = messageParts.joinToString("\n").trim(),
             tools = tools,
             toolErrors = toolErrors
         )
     }
-    
+
     private fun parseTool(line: String): ToolCommand? {
         val trimmed = line.trim()
-        
+
         // Parse remember() calls
         val rememberPattern = """remember\s*\(\s*"([^"]*)"\s*(?:,\s*(\d+))?\s*\)""".toRegex()
         val rememberMatch = rememberPattern.find(trimmed)
@@ -59,7 +61,7 @@ object TextResponseParser {
             val duration: Duration? = durationMinutes?.minutes
             return ToolCommand.Remember(content, duration)
         }
-        
+
         // Parse allow() calls
         val allowPattern = """allow\s*\(\s*(\d+)\s*(?:,\s*"([^"]*)")?\s*\)""".toRegex()
         val allowMatch = allowPattern.find(trimmed)
@@ -68,7 +70,7 @@ object TextResponseParser {
             val app = allowMatch.groupValues.getOrNull(2)?.takeIf { it.isNotBlank() }
             return ToolCommand.Allow(minutes.minutes, app)
         }
-        
+
         return null
     }
 
@@ -90,7 +92,7 @@ object TextResponseParser {
                 cleaned.append(text.substring(cursor, match.range.first))
             }
             val name = match.groups["name"]?.value?.lowercase()
-            val minutesStr = match.groups["minutes"]?.value
+            val minutesStr = match.groups["minutes"]?.value ?: match.groups["dur"]?.value
             val app = match.groups["app"]?.value?.takeIf { it.isNotBlank() }
             val content = match.groups["content"]?.value
 
@@ -147,14 +149,11 @@ object TextResponseParser {
         val toolErrors: List<ToolCallIssue>,
     )
 
-    // Matches allow(5) or remember("note", 10) even inline with text
+    // Matches allow(5) or remember("note", 10) even inline with text.
+    // "minutes" captures the number in allow(N); "dur" captures the optional duration in remember("...", N).
+    // They must have different names because Android's ICU regex rejects duplicate named groups.
     private val INLINE_TOOL_REGEX = Regex(
-        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?| "(?<content>[^"]+)"\s*(?:,\s*(?<minutes>\d+))?\s*)\)""",
+        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?|"(?<content>[^"]+)"\s*(?:,\s*(?<dur>\d+))?\s*)\)""",
         RegexOption.IGNORE_CASE
     )
 }
-
-// Global function for backward compatibility with existing tests
-fun parseAIResponse(text: String): ParsedResponse = TextResponseParser.parseAIResponse(text)
-
-

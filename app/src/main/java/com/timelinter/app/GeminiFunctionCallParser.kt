@@ -184,7 +184,7 @@ object GeminiFunctionCallParser {
                 cleaned.append(text.substring(cursor, match.range.first))
             }
             val name = match.groups["name"]?.value?.lowercase()
-            val minutesStr = match.groups["minutes"]?.value
+            val minutesStr = match.groups["minutes"]?.value ?: match.groups["dur"]?.value
             val app = match.groups["app"]?.value?.takeIf { it.isNotBlank() }
             val content = match.groups["content"]?.value
 
@@ -241,9 +241,11 @@ object GeminiFunctionCallParser {
         val issues: List<ToolCallIssue>,
     )
 
-    // Matches allow(5) or remember("note", 10) even when embedded in text
+    // Matches allow(5) or remember("note", 10) even when embedded in text.
+    // "minutes" captures the number in allow(N); "dur" captures the optional duration in remember("...", N).
+    // They must have different names because Android's ICU regex rejects duplicate named groups.
     private val INLINE_TOOL_REGEX = Regex(
-        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?| "(?<content>[^"]+)"\s*(?:,\s*(?<minutes>\d+))?\s*)\)""",
+        """(?<name>allow|remember)\s*\(\s*(?:(?<minutes>\d+)\s*(?:,\s*"(?<app>[^"]*)"\s*)?|"(?<content>[^"]+)"\s*(?:,\s*(?<dur>\d+))?\s*)\)""",
         RegexOption.IGNORE_CASE
     )
 

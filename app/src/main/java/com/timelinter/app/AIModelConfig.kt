@@ -8,7 +8,8 @@ enum class AIModelId {
     GEMINI_25_FLASH,
     GEMINI_25_FLASH_LITE,
     GEMINI_20_FLASH,
-    GEMINI_20_FLASH_LITE;
+    GEMINI_20_FLASH_LITE,
+    ON_DEVICE;
 
     companion object {
         fun fromId(id: String): AIModelId? = entries.firstOrNull { it.name == id }
@@ -78,6 +79,15 @@ data class AIModelConfig(
                 description = "Cheapest Gemini",
                 inputCost = 8,
                 outputCost = 30
+            ),
+            AIModelId.ON_DEVICE to AIModelConfig(
+                id = AIModelId.ON_DEVICE,
+                modelName = "on_device",
+                displayName = "On-Device (MediaPipe)",
+                provider = AIProvider.ON_DEVICE,
+                description = "Runs locally via MediaPipe LLM Inference. Free, private, no internet needed. Requires model file on device.",
+                inputCost = 0,
+                outputCost = 0
             )
         )
 

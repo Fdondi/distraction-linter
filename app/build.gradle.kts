@@ -89,6 +89,7 @@ dependencies {
     // Third party libraries
     implementation(libs.google.ai.client.generativeai)
     implementation("com.github.jknack:handlebars:4.4.0")
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 
     // Testing
     testImplementation(libs.junit)

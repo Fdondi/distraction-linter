@@ -31,6 +31,7 @@ class AIInteractionManager(
     defaultTask: AITask = AITask.FIRST_MESSAGE,
     private val backendGateway: BackendGateway = RealBackendGateway(),
     private val authProvider: suspend (Context) -> String? = { ctx -> AuthManager.signIn(ctx) },
+    private val onDeviceInferenceManager: OnDeviceInferenceManager = OnDeviceInferenceManager(context),
 ) {
     private val tag = "AIInteractionManager"
     private var generativeModel: GenerativeModel? = null
@@ -109,7 +110,8 @@ class AIInteractionManager(
 
     /**
      * Generate response for the current conversation history.
-     * Supports both Direct and Backend modes.
+     * Supports Backend, Direct, and On-Device modes.
+     * On-Device mode is selected per-task based on the model's provider.
      */
     suspend fun generateResponse(task: AITask): ParsedResponse? {
         val mode = SettingsManager.getAIMode(context)
@@ -118,6 +120,12 @@ class AIInteractionManager(
         if (history.isEmpty()) {
              Log.e(tag, "History is empty")
              return null
+        }
+
+        // Check if this task is configured to use an on-device model
+        val modelConfig = AIConfigManager.getModelForTask(context, task)
+        if (modelConfig.provider == AIProvider.ON_DEVICE) {
+            return generateOnDevice(history, task)
         }
 
         if (mode == SettingsManager.AI_MODE_BACKEND) {
@@ -191,6 +199,12 @@ class AIInteractionManager(
         contents: List<Content>,
         task: AITask = currentTask
     ): ParsedResponse? {
+         // Check if this task is configured to use an on-device model
+         val modelConfig = AIConfigManager.getModelForTask(context, task)
+         if (modelConfig.provider == AIProvider.ON_DEVICE) {
+             return generateOnDevice(contents, task)
+         }
+
          val mode = SettingsManager.getAIMode(context)
          if (mode == SettingsManager.AI_MODE_BACKEND) {
              
@@ -239,6 +253,34 @@ class AIInteractionManager(
                  null
              }
          }
+    }
+
+    /**
+     * Generate response using on-device inference via MediaPipe.
+     * Converts structured history to text, runs local model, parses text response.
+     */
+    private suspend fun generateOnDevice(
+        history: List<Content>,
+        task: AITask
+    ): ParsedResponse {
+        return try {
+            val prompt = ContentToTextConverter.convert(history)
+            Log.d(tag, "On-device prompt for ${task.displayName} (${prompt.length} chars)")
+            val textResponse = onDeviceInferenceManager.generateResponse(prompt)
+            TextResponseParser.parseAIResponse(textResponse)
+        } catch (e: OnDeviceModelException) {
+            Log.e(tag, "On-device model error", e)
+            ParsedResponse(
+                userMessage = "(On-Device Error: ${e.message})",
+                tools = emptyList()
+            )
+        } catch (e: Exception) {
+            Log.e(tag, "On-device inference error", e)
+            ParsedResponse(
+                userMessage = "(On-Device Error: ${e.message})",
+                tools = emptyList()
+            )
+        }
     }
 
     /**

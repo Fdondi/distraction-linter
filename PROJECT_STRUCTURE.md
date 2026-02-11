@@ -75,6 +75,20 @@ AI and Conversation
   - Uses `AIConfigManager` to get the configured model for each task.
   - Sends composed history from `ConversationHistoryManager`.
   - Supports switching between different AI models for different tasks.
+  - On-device path: when a task's model has provider `ON_DEVICE`, delegates to `OnDeviceInferenceManager`.
+
+- app/src/main/java/com/example/timelinter/OnDeviceInferenceManager.kt
+  - Wraps MediaPipe LLM Inference API for on-device model execution.
+  - Lazily loads model from configured file path; re-loads if path changes.
+  - Model path configured via `SettingsManager.getOnDeviceModelPath()`.
+
+- app/src/main/java/com/example/timelinter/ContentToTextConverter.kt
+  - Converts Gemini SDK `List<Content>` to plain text using Gemma chat template markers.
+  - Adapts tool-calling instructions from structured function calls to text-based format.
+
+- app/src/main/java/com/example/timelinter/TextResponseParser.kt
+  - Parses plain text AI responses into `ParsedResponse`, extracting text-based tool calls.
+  - Used by on-device inference path (models that don't support structured function calling).
 
 - app/src/main/java/com/example/timelinter/ConversationHistoryManager.kt
   - Owns two histories: user‑visible vs API (model) history.
@@ -136,7 +150,7 @@ AI Configuration
   - Each task corresponds to a stage in the conversation flow and can have a different AI model configured.
 
 - app/src/main/java/com/example/timelinter/AIProvider.kt
-  - Enum for AI providers (GOOGLE_AI, OPENAI, ANTHROPIC, CUSTOM).
+  - Enum for AI providers (GOOGLE_AI, ON_DEVICE, OPENAI, ANTHROPIC, CUSTOM).
 
 - app/src/main/java/com/example/timelinter/AIModelConfig.kt
   - Data class for AI model configuration.

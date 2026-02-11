@@ -5,6 +5,7 @@ package com.timelinter.app
  */
 enum class AIProvider {
     GOOGLE_AI,      // Google AI (Gemini)
+    ON_DEVICE,      // On-device inference via MediaPipe
     OPENAI,         // OpenAI (GPT)
     ANTHROPIC,      // Anthropic (Claude)
     CUSTOM;         // Custom/Self-hosted

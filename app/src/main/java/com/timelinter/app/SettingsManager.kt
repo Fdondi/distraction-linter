@@ -57,6 +57,9 @@ object SettingsManager {
     const val AI_MODE_DIRECT = "direct" // kept for internal/dev only
     const val AI_MODE_BACKEND = "backend"
 
+    // On-device model path
+    private const val ON_DEVICE_MODEL_PATH_KEY = "on_device_model_path"
+
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
@@ -251,5 +254,26 @@ object SettingsManager {
     fun setLogRetentionDays(context: Context, days: Int?) {
         val value = days ?: -1
         getPreferences(context).edit { putInt(LOG_RETENTION_DAYS_KEY, value) }
+    }
+
+    /* =========================  On-Device Model  ========================= */
+
+    /**
+     * Path to the on-device model file (e.g. a .task file for MediaPipe LLM Inference).
+     * Returns null if not configured.
+     */
+    fun getOnDeviceModelPath(context: Context): String? {
+        return getPreferences(context).getString(ON_DEVICE_MODEL_PATH_KEY, null)
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    fun setOnDeviceModelPath(context: Context, path: String?) {
+        getPreferences(context).edit {
+            if (path.isNullOrBlank()) {
+                remove(ON_DEVICE_MODEL_PATH_KEY)
+            } else {
+                putString(ON_DEVICE_MODEL_PATH_KEY, path)
+            }
+        }
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import java.io.File
 
 @Composable
 fun AIConfigScreen() {
@@ -28,6 +29,12 @@ fun AIConfigScreen() {
     var showImportDialog by remember { mutableStateOf(false) }
     var exportedJson by remember { mutableStateOf("") }
     var importJson by remember { mutableStateOf("") }
+
+    // On-device model path
+    var onDeviceModelPath by remember {
+        mutableStateOf(SettingsManager.getOnDeviceModelPath(context) ?: "")
+    }
+    val anyTaskUsesOnDevice = taskConfigs.values.any { it.provider == AIProvider.ON_DEVICE }
 
     // Refresh configs helper
     val refreshConfigs = {
@@ -67,6 +74,21 @@ fun AIConfigScreen() {
                         "Updated ${task.displayName} to ${newModel.displayName}",
                         Toast.LENGTH_SHORT
                     ).show()
+                },
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+
+        // On-device model path configuration (shown when any task uses on-device)
+        if (anyTaskUsesOnDevice) {
+            OnDeviceModelPathCard(
+                modelPath = onDeviceModelPath,
+                onPathChanged = { newPath ->
+                    onDeviceModelPath = newPath
+                    SettingsManager.setOnDeviceModelPath(
+                        context,
+                        newPath.takeIf { it.isNotBlank() }
+                    )
                 },
                 modifier = Modifier.padding(bottom = 16.dp)
             )
@@ -229,6 +251,7 @@ fun TaskConfigurationCard(
     
     // Helper to format price
     fun formatPrice(config: AIModelConfig): String {
+        if (config.inputCost == 0 && config.outputCost == 0) return "Free (on-device)"
         val inputPrice = config.inputCost / 100.0
         val outputPrice = config.outputCost / 100.0
         return "In: $${String.format("%.2f", inputPrice)}/M • Out: $${String.format("%.2f", outputPrice)}/M"
@@ -319,6 +342,79 @@ fun TaskConfigurationCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun OnDeviceModelPathCard(
+    modelPath: String,
+    onPathChanged: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val modelFileExists = remember(modelPath) {
+        modelPath.isNotBlank() && File(modelPath).exists()
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "On-Device Model",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Text(
+                text = "Path to the MediaPipe model file (.task) on this device. " +
+                       "Push a model via: adb push model.task /data/local/tmp/llm/",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+            )
+
+            OutlinedTextField(
+                value = modelPath,
+                onValueChange = onPathChanged,
+                label = { Text("Model file path") },
+                placeholder = { Text("/data/local/tmp/llm/model.task") },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("on_device_model_path")
+            )
+
+            // Status indicator
+            val statusText: String
+            val statusColor: androidx.compose.ui.graphics.Color
+            when {
+                modelPath.isBlank() -> {
+                    statusText = "No path configured"
+                    statusColor = MaterialTheme.colorScheme.error
+                }
+                modelFileExists -> {
+                    statusText = "Model file found"
+                    statusColor = MaterialTheme.colorScheme.primary
+                }
+                else -> {
+                    statusText = "Model file not found at this path"
+                    statusColor = MaterialTheme.colorScheme.error
+                }
+            }
+
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.labelSmall,
+                color = statusColor,
+                modifier = Modifier.padding(top = 8.dp)
             )
         }
     }
