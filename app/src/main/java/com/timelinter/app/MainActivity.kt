@@ -108,7 +108,8 @@ class MainActivity : ComponentActivity() {
     private fun refreshAuthState() {
         aiMode = SettingsManager.getAIMode(this)
         apiKeyPresent = ApiKeyManager.hasKey(this)
-        hasBackendToken = ApiKeyManager.hasAppToken(this) && !ApiKeyManager.isAppTokenExpired(this)
+        // Don't check local expiration - backend is authority
+        hasBackendToken = ApiKeyManager.hasAppToken(this)
     }
 
     fun refreshAuthStateForTests() {
@@ -376,14 +377,33 @@ class MainActivity : ComponentActivity() {
         if (aiMode != SettingsManager.AI_MODE_BACKEND) return
         if (isSigningIn) return
         val appToken = ApiKeyManager.getAppToken(this)
-        val shouldRefresh = appToken.isNullOrEmpty() || ApiKeyManager.isAppTokenExpired(this)
-        if (!shouldRefresh) return
+        if (appToken.isNullOrEmpty()) {
+            // No token at all, try to get one if allowed
+            lifecycleScope.launch {
+                isSigningIn = true
+                try {
+                    val helper = createBackendAuthHelper()
+                    val refreshed = helper.ensureValidAppToken()
+                    hasBackendToken = !refreshed.isNullOrEmpty()
+                } finally {
+                    isSigningIn = false
+                }
+            }
+            return
+        }
+        // We have a token - check with backend if it's still valid
         lifecycleScope.launch {
             isSigningIn = true
             try {
                 val helper = createBackendAuthHelper()
-                val refreshed = helper.ensureValidAppToken()
-                hasBackendToken = !refreshed.isNullOrEmpty()
+                val isValid = helper.checkTokenWithBackend()
+                if (!isValid) {
+                    // Token expired, try to refresh if allowed (monthly check)
+                    val refreshed = helper.ensureValidAppToken()
+                    hasBackendToken = !refreshed.isNullOrEmpty()
+                } else {
+                    hasBackendToken = true
+                }
             } finally {
                 isSigningIn = false
             }
@@ -394,14 +414,17 @@ class MainActivity : ComponentActivity() {
         return BackendAuthHelper(
             signIn = { AuthManager.signIn(this@MainActivity) },
             getAppToken = { ApiKeyManager.getAppToken(this@MainActivity) },
-            isAppTokenExpired = { ApiKeyManager.isAppTokenExpired(this@MainActivity) },
             saveAppToken = { token, expiresAtMs ->
                 ApiKeyManager.saveAppToken(this@MainActivity, token, expiresAtMs)
             },
             clearAppToken = { ApiKeyManager.clearAppToken(this@MainActivity) },
             getGoogleIdToken = { ApiKeyManager.getGoogleIdToken(this@MainActivity) },
             backend = RealBackendGateway(),
-            timeProviderMs = { System.currentTimeMillis() }
+            checkAuthStatus = { token ->
+                withContext(Dispatchers.IO) {
+                    BackendClient.checkAuthStatus(token)
+                }
+            }
         )
     }
 

@@ -55,21 +55,22 @@ class RealBackendGateway : BackendGateway {
  * Handles retrieving, refreshing, and persisting app tokens for backend calls.
  *
  * Flow:
- * - Use stored app token if present and not expired.
- * - If app token is missing or expired, get Google ID token (or trigger sign-in).
- * - Exchange Google ID token for a new app token (valid for 1 month).
+ * - Use stored app token if present (backend is authority on expiration).
+ * - If app token is missing, get Google ID token (or trigger sign-in) and exchange for app token.
  * - Use app token for API calls.
- * - If backend returns 401, clear tokens, re-sign, exchange, and retry once.
+ * - If backend returns 401, clear tokens and try to get a fresh one.
+ *
+ * Key principle: The backend is the authority on token expiration and enforces the monthly
+ * Google sign-in requirement. The client simply renews when the backend says the token is expired.
  */
 class BackendAuthHelper(
     private val signIn: suspend () -> String?,
     private val getAppToken: () -> String?,
-    private val isAppTokenExpired: () -> Boolean,
     private val saveAppToken: (String, Long) -> Unit,
     private val clearAppToken: () -> Unit,
     private val getGoogleIdToken: () -> String?,
     private val backend: BackendGateway,
-    private val timeProviderMs: () -> Long = { System.currentTimeMillis() },
+    private val checkAuthStatus: suspend (String) -> Unit,
 ) {
     suspend fun generateWithAutoRefresh(
         model: String,
@@ -85,7 +86,8 @@ class BackendAuthHelper(
             return backend.generate(token, model, contents, prompt)
         } catch (e: BackendHttpException) {
             if (e.statusCode != 401) throw e
-            // Token rejected; clear and retry once with a fresh token.
+            // Token rejected by backend (backend is source of truth for expiration).
+            // Clear the token and try to get a fresh one.
             clearAppToken()
             val refreshed = ensureValidAppToken()
                 ?: throw BackendAuthException("Unable to refresh app token")
@@ -94,16 +96,46 @@ class BackendAuthHelper(
     }
 
     /**
+     * Checks token validity with the backend. Returns true if token is valid, false otherwise.
+     * This is used when the app opens to verify the token without sending a message.
+     */
+    suspend fun checkTokenWithBackend(): Boolean {
+        val token = getAppToken() ?: return false
+        return try {
+            checkAuthStatus(token)
+            true
+        } catch (e: BackendHttpException) {
+            if (e.statusCode == 401) {
+                // Token expired according to backend
+                clearAppToken()
+                false
+            } else {
+                // Other error, assume token is still valid (don't clear on network errors)
+                true
+            }
+        } catch (e: Exception) {
+            // Network or other error, assume token is still valid
+            true
+        }
+    }
+
+    /**
      * Ensures we have a valid app token. Returns the token or null if unable to obtain one.
      * This will exchange a Google ID token for an app token if needed.
+     * 
+     * Key principle: The backend is the authority on token expiration. We don't check locally.
+     * If we have a token, we use it and let the backend decide if it's valid.
+     * The backend enforces the monthly Google sign-in requirement.
      */
     suspend fun ensureValidAppToken(): String? {
         val appToken = getAppToken()
-        if (!appToken.isNullOrEmpty() && !isAppTokenExpired()) {
+        
+        // If we have a token, use it - backend will tell us if it's expired
+        if (!appToken.isNullOrEmpty()) {
             return appToken
         }
 
-        // App token is missing or expired, need to exchange
+        // No token at all, exchange for a new one
         return exchangeForAppToken()
     }
 

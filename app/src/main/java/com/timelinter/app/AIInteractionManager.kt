@@ -10,6 +10,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -39,14 +40,17 @@ class AIInteractionManager(
     private val backendAuthHelper = BackendAuthHelper(
         signIn = { authProvider(context) },
         getAppToken = { ApiKeyManager.getAppToken(context) },
-        isAppTokenExpired = { ApiKeyManager.isAppTokenExpired(context) },
         saveAppToken = { token, expiresAtMs ->
             ApiKeyManager.saveAppToken(context, token, expiresAtMs)
         },
         clearAppToken = { ApiKeyManager.clearAppToken(context) },
         getGoogleIdToken = { ApiKeyManager.getGoogleIdToken(context) },
         backend = backendGateway,
-        timeProviderMs = { System.currentTimeMillis() },
+        checkAuthStatus = { token ->
+            withContext(Dispatchers.IO) {
+                BackendClient.checkAuthStatus(token)
+            }
+        }
     )
 
     init {

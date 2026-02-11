@@ -19,6 +19,7 @@ object ApiKeyManager {
     private const val API_KEY_PREF = "gemini_api_key"
     private const val GOOGLE_ID_TOKEN_PREF = "google_id_token"
     private const val GOOGLE_ID_LAST_REFRESH_PREF = "google_id_last_refresh_ms"
+    private const val GOOGLE_LAST_SIGN_IN_PREF = "google_last_sign_in_ms"
     private const val APP_TOKEN_PREF = "app_token"
     private const val APP_TOKEN_EXPIRES_AT_PREF = "app_token_expires_at_ms"
     private const val HEADS_UP_INFO_SHOWN_PREF = "heads_up_info_shown"
@@ -92,7 +93,43 @@ object ApiKeyManager {
     fun clearGoogleIdToken(context: Context) {
         getPreferences(context).edit().remove(GOOGLE_ID_TOKEN_PREF).apply()
         getPreferences(context).edit().remove(GOOGLE_ID_LAST_REFRESH_PREF).apply()
+        getPreferences(context).edit().remove(GOOGLE_LAST_SIGN_IN_PREF).apply()
         Log.i(TAG, "Google ID Token cleared.")
+    }
+
+    fun setLastGoogleSignIn(context: Context, timeMs: Long) {
+        val prefs = getPreferences(context)
+        val existing = if (prefs.contains(GOOGLE_LAST_SIGN_IN_PREF)) {
+            prefs.getLong(GOOGLE_LAST_SIGN_IN_PREF, 0L)
+        } else {
+            null
+        }
+        if (existing != null && existing == timeMs) {
+            Log.d(TAG, "Last Google sign-in time unchanged: $timeMs")
+            return
+        }
+        prefs.edit().putLong(GOOGLE_LAST_SIGN_IN_PREF, timeMs).apply()
+        Log.d(TAG, "Last Google sign-in time recorded: $timeMs")
+    }
+
+    fun getLastGoogleSignIn(context: Context): Long? {
+        val prefs = getPreferences(context)
+        if (!prefs.contains(GOOGLE_LAST_SIGN_IN_PREF)) return null
+        return prefs.getLong(GOOGLE_LAST_SIGN_IN_PREF, 0L)
+    }
+
+    /**
+     * Checks if it's been more than a month since the last Google sign-in.
+     * Returns true if we should allow a new Google sign-in, false if we should wait.
+     */
+    fun shouldAllowGoogleSignIn(context: Context): Boolean {
+        val lastSignIn = getLastGoogleSignIn(context) ?: return true // No previous sign-in, allow it
+        val now = System.currentTimeMillis()
+        val oneMonthMs = 30L * 24 * 60 * 60 * 1000 // 30 days in milliseconds
+        val timeSinceLastSignIn = now - lastSignIn
+        val shouldAllow = timeSinceLastSignIn >= oneMonthMs
+        Log.d(TAG, "Should allow Google sign-in: $shouldAllow (last sign-in: ${timeSinceLastSignIn / (24 * 60 * 60 * 1000)} days ago)")
+        return shouldAllow
     }
 
     fun saveAppToken(context: Context, token: String, expiresAtMs: Long) {
