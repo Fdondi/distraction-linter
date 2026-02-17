@@ -90,6 +90,7 @@ dependencies {
     implementation(libs.google.ai.client.generativeai)
     implementation("com.github.jknack:handlebars:4.4.0")
     implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.9.0-alpha03")
 
     // Testing
     testImplementation(libs.junit)

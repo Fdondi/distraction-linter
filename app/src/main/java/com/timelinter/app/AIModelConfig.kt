@@ -9,10 +9,15 @@ enum class AIModelId {
     GEMINI_25_FLASH_LITE,
     GEMINI_20_FLASH,
     GEMINI_20_FLASH_LITE,
-    ON_DEVICE;
+    ON_DEVICE_MEDIAPIPE,
+    ON_DEVICE_LITERT;
 
     companion object {
-        fun fromId(id: String): AIModelId? = entries.firstOrNull { it.name == id }
+        fun fromId(id: String): AIModelId? {
+            // Support legacy "ON_DEVICE" persisted value → map to MediaPipe
+            if (id == "ON_DEVICE") return ON_DEVICE_MEDIAPIPE
+            return entries.firstOrNull { it.name == id }
+        }
     }
 }
 
@@ -27,7 +32,8 @@ data class AIModelConfig(
     val description: String,
     val inputCost: Int,
     val outputCost: Int,
-    val maxTokens: Int? = null
+    val maxTokens: Int? = null,
+    val maxOutputTokens: Int? = null
 ) {
     companion object {
         /**
@@ -80,14 +86,25 @@ data class AIModelConfig(
                 inputCost = 8,
                 outputCost = 30
             ),
-            AIModelId.ON_DEVICE to AIModelConfig(
-                id = AIModelId.ON_DEVICE,
-                modelName = "on_device",
+            AIModelId.ON_DEVICE_MEDIAPIPE to AIModelConfig(
+                id = AIModelId.ON_DEVICE_MEDIAPIPE,
+                modelName = "on_device_mediapipe",
                 displayName = "On-Device (MediaPipe)",
-                provider = AIProvider.ON_DEVICE,
-                description = "Runs locally via MediaPipe LLM Inference. Free, private, no internet needed. Requires model file on device.",
+                provider = AIProvider.ON_DEVICE_MEDIAPIPE,
+                description = "Runs locally via MediaPipe. Free, private, no internet. Requires .task model file.",
                 inputCost = 0,
-                outputCost = 0
+                outputCost = 0,
+                maxOutputTokens = 128
+            ),
+            AIModelId.ON_DEVICE_LITERT to AIModelConfig(
+                id = AIModelId.ON_DEVICE_LITERT,
+                modelName = "on_device_litert",
+                displayName = "On-Device (LiteRT-LM)",
+                provider = AIProvider.ON_DEVICE_LITERT,
+                description = "Runs locally via LiteRT-LM. Free, private, no internet. Requires .litertlm model file.",
+                inputCost = 0,
+                outputCost = 0,
+                maxOutputTokens = 128
             )
         )
 

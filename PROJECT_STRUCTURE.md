@@ -75,20 +75,33 @@ AI and Conversation
   - Uses `AIConfigManager` to get the configured model for each task.
   - Sends composed history from `ConversationHistoryManager`.
   - Supports switching between different AI models for different tasks.
-  - On-device path: when a task's model has provider `ON_DEVICE`, delegates to `OnDeviceInferenceManager`.
+  - On-device path: when a task's model has `provider.isOnDevice`, delegates to the matching `OnDeviceRuntime` (MediaPipe or LiteRT-LM).
 
-- app/src/main/java/com/example/timelinter/OnDeviceInferenceManager.kt
-  - Wraps MediaPipe LLM Inference API for on-device model execution.
-  - Lazily loads model from configured file path; re-loads if path changes.
-  - Model path configured via `SettingsManager.getOnDeviceModelPath()`.
+- app/src/main/java/com/example/timelinter/OnDeviceRuntime.kt
+  - Interface for on-device LLM runtimes. `generateResponse(history, maxOutputTokens)` → `ParsedResponse`.
+  - Also defines `OnDeviceModelException`.
+
+- app/src/main/java/com/example/timelinter/MediaPipeRuntime.kt
+  - `OnDeviceRuntime` backed by MediaPipe LLM Inference.
+  - Converts history via `ContentToTextConverter`, parses via `TextResponseParser`.
+  - Post-truncation safety net (can't stop GPU mid-generation).
+  - Model path: `SettingsManager.getMediaPipeModelPath()`.
+
+- app/src/main/java/com/example/timelinter/LiteRtLmRuntime.kt
+  - `OnDeviceRuntime` backed by LiteRT-LM.
+  - Native Conversation API with structured tool calling (allow, remember).
+  - Streaming + `cancelProcess()` for hard output limit that saves GPU.
+  - Model path: `SettingsManager.getLiteRtModelPath()`.
 
 - app/src/main/java/com/example/timelinter/ContentToTextConverter.kt
   - Converts Gemini SDK `List<Content>` to plain text using Gemma chat template markers.
   - Adapts tool-calling instructions from structured function calls to text-based format.
+  - Appends brevity instruction to the last user turn for on-device models.
 
 - app/src/main/java/com/example/timelinter/TextResponseParser.kt
   - Parses plain text AI responses into `ParsedResponse`, extracting text-based tool calls.
-  - Used by on-device inference path (models that don't support structured function calling).
+  - Used by MediaPipe runtime (models that don't support structured function calling).
+  - Also used as fallback by LiteRT-LM runtime for inline tool calls in text.
 
 - app/src/main/java/com/example/timelinter/ConversationHistoryManager.kt
   - Owns two histories: user‑visible vs API (model) history.
@@ -150,7 +163,8 @@ AI Configuration
   - Each task corresponds to a stage in the conversation flow and can have a different AI model configured.
 
 - app/src/main/java/com/example/timelinter/AIProvider.kt
-  - Enum for AI providers (GOOGLE_AI, ON_DEVICE, OPENAI, ANTHROPIC, CUSTOM).
+  - Enum for AI providers (GOOGLE_AI, ON_DEVICE_MEDIAPIPE, ON_DEVICE_LITERT, OPENAI, ANTHROPIC, CUSTOM).
+  - `isOnDevice` property returns true for both on-device providers.
 
 - app/src/main/java/com/example/timelinter/AIModelConfig.kt
   - Data class for AI model configuration.
@@ -225,6 +239,8 @@ Tests
   - `GoodAppsTokenBucketTest.kt` – comprehensive tests for good apps feature (overfill, decay, rewards)
   - `ScreenUnlockBehaviorTest.kt` – tests bucket refill after time gaps (simulating phone lock/unlock)
   - `TextResponseParser.kt` – test helper for parsing text-based function calls without GenerateContentResponse
+  - `ContentToTextConverterTest.kt` – chat template conversion, brevity instruction placement
+  - `OnDeviceRuntimeTest.kt` – model config, provider routing, post-truncation logic
   - `CoachNameUnitTest.kt`, `ApiKeyManagerCoachNameTest.kt`
 
 - Instrumented Tests – app/src/androidTest/java/com/example/timelinter/

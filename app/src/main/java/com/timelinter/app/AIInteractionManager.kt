@@ -31,7 +31,8 @@ class AIInteractionManager(
     defaultTask: AITask = AITask.FIRST_MESSAGE,
     private val backendGateway: BackendGateway = RealBackendGateway(),
     private val authProvider: suspend (Context) -> String? = { ctx -> AuthManager.signIn(ctx) },
-    private val onDeviceInferenceManager: OnDeviceInferenceManager = OnDeviceInferenceManager(context),
+    private val mediaPipeRuntime: MediaPipeRuntime = MediaPipeRuntime(context),
+    private val liteRtLmRuntime: LiteRtLmRuntime = LiteRtLmRuntime(context),
 ) {
     private val tag = "AIInteractionManager"
     private var generativeModel: GenerativeModel? = null
@@ -124,8 +125,8 @@ class AIInteractionManager(
 
         // Check if this task is configured to use an on-device model
         val modelConfig = AIConfigManager.getModelForTask(context, task)
-        if (modelConfig.provider == AIProvider.ON_DEVICE) {
-            return generateOnDevice(history, task)
+        if (modelConfig.provider.isOnDevice) {
+            return generateOnDevice(history, modelConfig)
         }
 
         if (mode == SettingsManager.AI_MODE_BACKEND) {
@@ -201,8 +202,8 @@ class AIInteractionManager(
     ): ParsedResponse? {
          // Check if this task is configured to use an on-device model
          val modelConfig = AIConfigManager.getModelForTask(context, task)
-         if (modelConfig.provider == AIProvider.ON_DEVICE) {
-             return generateOnDevice(contents, task)
+         if (modelConfig.provider.isOnDevice) {
+             return generateOnDevice(contents, modelConfig)
          }
 
          val mode = SettingsManager.getAIMode(context)
@@ -256,18 +257,29 @@ class AIInteractionManager(
     }
 
     /**
-     * Generate response using on-device inference via MediaPipe.
-     * Converts structured history to text, runs local model, parses text response.
+     * Generate response using on-device inference.
+     * Routes to the correct runtime (MediaPipe or LiteRT-LM) based on the model config.
      */
     private suspend fun generateOnDevice(
         history: List<Content>,
-        task: AITask
+        modelConfig: AIModelConfig
     ): ParsedResponse {
+        val runtime: OnDeviceRuntime = when (modelConfig.provider) {
+            AIProvider.ON_DEVICE_MEDIAPIPE -> mediaPipeRuntime
+            AIProvider.ON_DEVICE_LITERT -> liteRtLmRuntime
+            else -> {
+                Log.e(tag, "Unexpected provider for on-device: ${modelConfig.provider}")
+                return ParsedResponse(
+                    userMessage = "(Error: Unknown on-device provider)",
+                    tools = emptyList()
+                )
+            }
+        }
+        val maxOutputTokens = modelConfig.maxOutputTokens ?: 128
+
         return try {
-            val prompt = ContentToTextConverter.convert(history)
-            Log.d(tag, "On-device prompt for ${task.displayName} (${prompt.length} chars)")
-            val textResponse = onDeviceInferenceManager.generateResponse(prompt)
-            TextResponseParser.parseAIResponse(textResponse)
+            Log.d(tag, "On-device inference via ${modelConfig.provider} (maxOutput=$maxOutputTokens)")
+            runtime.generateResponse(history, maxOutputTokens)
         } catch (e: OnDeviceModelException) {
             Log.e(tag, "On-device model error", e)
             ParsedResponse(

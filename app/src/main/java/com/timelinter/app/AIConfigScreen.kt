@@ -30,11 +30,20 @@ fun AIConfigScreen() {
     var exportedJson by remember { mutableStateOf("") }
     var importJson by remember { mutableStateOf("") }
 
-    // On-device model path
-    var onDeviceModelPath by remember {
-        mutableStateOf(SettingsManager.getOnDeviceModelPath(context) ?: "")
+    // On-device model paths
+    var mediaPipeModelPath by remember {
+        mutableStateOf(SettingsManager.getMediaPipeModelPath(context) ?: "")
     }
-    val anyTaskUsesOnDevice = taskConfigs.values.any { it.provider == AIProvider.ON_DEVICE }
+    var liteRtModelPath by remember {
+        mutableStateOf(SettingsManager.getLiteRtModelPath(context) ?: "")
+    }
+    // On-device model file availability for greying out picker options
+    val onDeviceModelAvailability = remember(mediaPipeModelPath, liteRtModelPath) {
+        mapOf(
+            AIModelId.ON_DEVICE_MEDIAPIPE to (mediaPipeModelPath.isNotBlank() && File(mediaPipeModelPath).exists()),
+            AIModelId.ON_DEVICE_LITERT to (liteRtModelPath.isNotBlank() && File(liteRtModelPath).exists()),
+        )
+    }
 
     // Refresh configs helper
     val refreshConfigs = {
@@ -66,6 +75,7 @@ fun AIConfigScreen() {
                 task = task,
                 currentConfig = taskConfigs[task]!!,
                 availableModels = availableModels,
+                onDeviceModelAvailability = onDeviceModelAvailability,
                 onModelSelected = { newModel ->
                     AIConfigManager.setModelForTask(context, task, newModel)
                     refreshConfigs()
@@ -79,20 +89,45 @@ fun AIConfigScreen() {
             )
         }
 
-        // On-device model path configuration (shown when any task uses on-device)
-        if (anyTaskUsesOnDevice) {
-            OnDeviceModelPathCard(
-                modelPath = onDeviceModelPath,
-                onPathChanged = { newPath ->
-                    onDeviceModelPath = newPath
-                    SettingsManager.setOnDeviceModelPath(
-                        context,
-                        newPath.takeIf { it.isNotBlank() }
-                    )
-                },
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-        }
+        // On-device model path configurations (always visible so users can configure paths
+        // before selecting an on-device model in the picker)
+        Text(
+            text = "On-Device Models",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
+        )
+
+        OnDeviceModelPathCard(
+            title = "MediaPipe Model (.task)",
+            description = "Download from HuggingFace (litert-community), then push via:\nadb push model.task /data/local/tmp/llm/",
+            modelPath = mediaPipeModelPath,
+            placeholder = "/data/local/tmp/llm/model.task",
+            testTag = "mediapipe_model_path",
+            onPathChanged = { newPath ->
+                mediaPipeModelPath = newPath
+                SettingsManager.setMediaPipeModelPath(
+                    context,
+                    newPath.takeIf { it.isNotBlank() }
+                )
+            },
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        OnDeviceModelPathCard(
+            title = "LiteRT-LM Model (.litertlm)",
+            description = "Download gemma-3n-E2B-it-int4.litertlm from HuggingFace (google/gemma-3n-E2B-it-litert-lm), then push via:\nadb push model.litertlm /data/local/tmp/llm/",
+            modelPath = liteRtModelPath,
+            placeholder = "/data/local/tmp/llm/gemma-3n-E2B-it-int4.litertlm",
+            testTag = "litert_model_path",
+            onPathChanged = { newPath ->
+                liteRtModelPath = newPath
+                SettingsManager.setLiteRtModelPath(
+                    context,
+                    newPath.takeIf { it.isNotBlank() }
+                )
+            },
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -244,6 +279,7 @@ fun TaskConfigurationCard(
     task: AITask,
     currentConfig: AIModelConfig,
     availableModels: List<AIModelConfig>,
+    onDeviceModelAvailability: Map<AIModelId, Boolean>,
     onModelSelected: (AIModelConfig) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -299,16 +335,25 @@ fun TaskConfigurationCard(
             )
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 availableModels.forEach { model ->
+                    val isOnDevice = model.provider.isOnDevice
+                    val fileAvailable = onDeviceModelAvailability[model.id] == true
+                    val showWarning = isOnDevice && !fileAvailable
+
                     DropdownMenuItem(
                         modifier = Modifier.testTag("model_option_${task.name}_${model.id.name}"),
                         text = {
                             Column {
                                 Text(model.displayName)
-                                if (model.description.isNotEmpty()) {
+                                Text(
+                                    text = model.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (showWarning) {
                                     Text(
-                                        text = model.description,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = "⚠ Model file not found — configure path below",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error
                                     )
                                 }
                                 Text(
@@ -349,7 +394,11 @@ fun TaskConfigurationCard(
 
 @Composable
 fun OnDeviceModelPathCard(
+    title: String,
+    description: String,
     modelPath: String,
+    placeholder: String,
+    testTag: String,
     onPathChanged: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -369,13 +418,12 @@ fun OnDeviceModelPathCard(
                 .padding(16.dp)
         ) {
             Text(
-                text = "On-Device Model",
+                text = title,
                 style = MaterialTheme.typography.titleMedium
             )
 
             Text(
-                text = "Path to the MediaPipe model file (.task) on this device. " +
-                       "Push a model via: adb push model.task /data/local/tmp/llm/",
+                text = description,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
@@ -385,11 +433,11 @@ fun OnDeviceModelPathCard(
                 value = modelPath,
                 onValueChange = onPathChanged,
                 label = { Text("Model file path") },
-                placeholder = { Text("/data/local/tmp/llm/model.task") },
+                placeholder = { Text(placeholder) },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("on_device_model_path")
+                    .testTag(testTag)
             )
 
             // Status indicator

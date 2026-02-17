@@ -18,8 +18,14 @@ object ContentToTextConverter {
     private const val CLOUD_TOOL_INSTRUCTION = "When needed, CALL FUNCTIONS (no textual commands):"
     private const val ON_DEVICE_TOOL_INSTRUCTION = "When needed, write tool calls as text in your response:"
 
+    internal const val BREVITY_INSTRUCTION =
+        "\n[IMPORTANT: Keep your response to 1-2 short sentences maximum. Be concise.]"
+
     /**
      * Convert conversation history to Gemma chat-template formatted text.
+     *
+     * A brevity instruction is appended to the last user turn so the
+     * on-device model keeps its output short (fits notifications, saves GPU).
      *
      * Output format:
      * ```
@@ -35,14 +41,21 @@ object ContentToTextConverter {
     fun convert(history: List<Content>): String {
         val sb = StringBuilder()
 
-        for (content in history) {
+        val lastUserIndex = history.indexOfLast { (it.role ?: "user") == "user" }
+
+        for ((index, content) in history.withIndex()) {
             val role = content.role ?: "user"
             val text = content.parts
                 .filterIsInstance<TextPart>()
                 .joinToString("\n") { it.text }
 
             // Adapt tool instructions for text-based calling
-            val adaptedText = text.replace(CLOUD_TOOL_INSTRUCTION, ON_DEVICE_TOOL_INSTRUCTION)
+            var adaptedText = text.replace(CLOUD_TOOL_INSTRUCTION, ON_DEVICE_TOOL_INSTRUCTION)
+
+            // Append brevity instruction to the last user turn
+            if (index == lastUserIndex) {
+                adaptedText += BREVITY_INSTRUCTION
+            }
 
             sb.append("<start_of_turn>")
             sb.append(role)

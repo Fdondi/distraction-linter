@@ -57,8 +57,9 @@ object SettingsManager {
     const val AI_MODE_DIRECT = "direct" // kept for internal/dev only
     const val AI_MODE_BACKEND = "backend"
 
-    // On-device model path
-    private const val ON_DEVICE_MODEL_PATH_KEY = "on_device_model_path"
+    // On-device model paths
+    private const val ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY = "on_device_mediapipe_model_path"
+    private const val ON_DEVICE_LITERT_MODEL_PATH_KEY = "on_device_litert_model_path"
 
     private fun getPreferences(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -256,24 +257,64 @@ object SettingsManager {
         getPreferences(context).edit { putInt(LOG_RETENTION_DAYS_KEY, value) }
     }
 
-    /* =========================  On-Device Model  ========================= */
+    /* =========================  On-Device Models  ========================= */
 
     /**
-     * Path to the on-device model file (e.g. a .task file for MediaPipe LLM Inference).
+     * Path to the MediaPipe model file (.task).
      * Returns null if not configured.
      */
-    fun getOnDeviceModelPath(context: Context): String? {
-        return getPreferences(context).getString(ON_DEVICE_MODEL_PATH_KEY, null)
+    fun getMediaPipeModelPath(context: Context): String? {
+        val prefs = getPreferences(context)
+        // Migrate legacy key if present
+        val legacy = prefs.getString("on_device_model_path", null)?.takeIf { it.isNotBlank() }
+        if (legacy != null && prefs.getString(ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY, null) == null) {
+            prefs.edit {
+                putString(ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY, legacy)
+                remove("on_device_model_path")
+            }
+            return legacy
+        }
+        return prefs.getString(ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY, null)
             ?.takeIf { it.isNotBlank() }
     }
 
-    fun setOnDeviceModelPath(context: Context, path: String?) {
+    fun setMediaPipeModelPath(context: Context, path: String?) {
         getPreferences(context).edit {
             if (path.isNullOrBlank()) {
-                remove(ON_DEVICE_MODEL_PATH_KEY)
+                remove(ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY)
             } else {
-                putString(ON_DEVICE_MODEL_PATH_KEY, path)
+                putString(ON_DEVICE_MEDIAPIPE_MODEL_PATH_KEY, path)
             }
+        }
+    }
+
+    /**
+     * Path to the LiteRT-LM model file (.litertlm).
+     * Returns null if not configured.
+     */
+    fun getLiteRtModelPath(context: Context): String? {
+        return getPreferences(context).getString(ON_DEVICE_LITERT_MODEL_PATH_KEY, null)
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    fun setLiteRtModelPath(context: Context, path: String?) {
+        getPreferences(context).edit {
+            if (path.isNullOrBlank()) {
+                remove(ON_DEVICE_LITERT_MODEL_PATH_KEY)
+            } else {
+                putString(ON_DEVICE_LITERT_MODEL_PATH_KEY, path)
+            }
+        }
+    }
+
+    /**
+     * Get the model path for a given on-device provider.
+     */
+    fun getOnDeviceModelPath(context: Context, provider: AIProvider): String? {
+        return when (provider) {
+            AIProvider.ON_DEVICE_MEDIAPIPE -> getMediaPipeModelPath(context)
+            AIProvider.ON_DEVICE_LITERT -> getLiteRtModelPath(context)
+            else -> null
         }
     }
 }
